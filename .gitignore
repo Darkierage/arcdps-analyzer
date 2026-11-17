@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+build/
+dist/
+*.spec
+!packaging/wvw_analyzer.spec
+
+# Node / frontend
+node_modules/
+frontend/build/
+frontend/.svelte-kit/
+
+# App runtime data (local only)
+bin/
+models/
+data/
+config.yaml
+
+# Raw logs and EI output (large, personal)
+*.zevtc
+*.evtc
+*.json.gz
+tests/fixtures/raw/
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

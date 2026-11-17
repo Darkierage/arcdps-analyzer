@@ -1,0 +1,147 @@
+# Note templates for detector findings.
+# {placeholders} are filled from the finding's evidence. Copy this file to
+# <data dir>/templates.yaml and edit it to customize the wording for your guild;
+# keys you leave out fall back to these defaults.
+
+stab_gap_deaths:
+  title: "Stability gap during enemy bomb ({time})"
+  cause: >-
+    At {time}, {downs} players went down in one burst ({deaths} died). Stability coverage just
+    before was low in party {parties}, and {nostab} of the {downs} downed players had no stability.
+    This happened {bombs} time(s) this fight ({bomb_times}).
+  fix: >-
+    Keep stability ready for the enemy push, not the approach. Stagger the firebrands (one opens,
+    one holds for the enemy bomb), call stab right before contact, and re-stab after the first
+    exchange.
+
+boon_wipe:
+  title: "Enemy strip/corrupt bomb landed ({time})"
+  cause: >-
+    At {time} the squad's average boons dropped from {before} to {after} per player within
+    seconds, and {downs} downs followed. It happened {count} time(s) ({times}). In total enemies
+    stripped {boons_lost} boons from you; you stripped {strips}.
+  fix: >-
+    Answer strip bombs with immediate boon reapplication (stab, resistance, protection), and use
+    aegis, blocks or distortions to absorb the incoming bomb. Don't stand in the enemy's
+    corrupt/well fields while boonless; move the blob out, then re-engage.
+
+strip_balance:
+  title: "Losing the strip war"
+  cause: >-
+    Enemies removed {boons_lost} boons from the squad, while the squad stripped {strips}
+    ({per_enemy_min} strips per enemy per minute). Only {strippers} player(s) contributed
+    meaningful strips: {top_strippers}.
+  fix: >-
+    Bring or activate more strip-capable builds (spellbreaker, scourge, reaper, chrono...) and
+    time the strip skills to land right before your damage bomb, so the enemy loses stability and
+    protection when the burst hits.
+
+strip_balance_good:
+  title: "Won the strip war"
+  cause: "The squad stripped {strips} boons and lost only {boons_lost}. Top strippers: {top_strippers}."
+  fix: "Keep it up."
+
+out_of_position:
+  title: "Players caught away from the tag"
+  cause: >-
+    {far_downs} of {downs} downs ({share}%) happened far from the commander or the stack (median
+    {median_dist} distance). Players caught: {players}. Professions: {professions}.
+  fix: >-
+    Stay within about {far_tag} of the tag, inside boon and heal range. The backline should stick
+    to its supports instead of drifting, and players should stop chasing kills away from the
+    blob.
+
+early_cascade:
+  title: "Lost the opening exchange"
+  cause: >-
+    {downs} players went down within {seconds}s starting at {time} ({since_engage}s into the
+    engagement), while the enemy had only {enemy_downs} down(s). {with_stab} of them had
+    stability. First downs: {players}.
+  fix: >-
+    Engage only with the full boon setup (stab, aegis, protection, resistance) applied, and
+    pre-stack on the tag before contact. If the enemy opens first, bait their bomb and hold yours
+    until their cooldowns are used.
+
+cleanse_pressure:
+  title: "Condition pressure overwhelmed cleanses"
+  cause: >-
+    Players carried {avg_conditions} conditions on average during the fight (peak
+    {peak_conditions}), with {resist}% resistance coverage. {downs_high_condi} downs happened while
+    carrying {down_conditions} or more conditions, and {condi_share}% of damage taken was
+    condition damage. Squad cleanses: {cleanses} (top: {top_cleansers}).
+  fix: >-
+    Add resistance uptime and burst cleanses for the moments the enemy's condition bomb lands.
+    Assign a cleanser (scrapper, tempest or druid) to every party, and avoid fighting inside
+    enemy condition fields.
+
+downstate_own:
+  title: "Downed allies were not picked up"
+  cause: >-
+    {deaths} of {downs} downs ({rate}%) ended in death. Squad resurrects: {resurrects}; healing on
+    downed allies: {downed_healing}.
+  fix: >-
+    Assign rezzing (supports and the closest players), and use downed-healing skills and banners.
+    Cleave the enemies standing near downed allies so they can rally, and avoid moving the blob
+    away from downed players.
+
+downstate_enemy:
+  title: "Enemy downs escaped"
+  cause: >-
+    Only {enemy_deaths} of {enemy_downs} enemy downs ({conversion}%) were turned into kills;
+    {escaped} got back up. Damage to downed targets: {against_downed} ({cleave_share}% of squad
+    damage).
+  fix: >-
+    After a bomb, push through downed enemies with cleave and stomps, and use CC to stop res
+    attempts. Don't retreat immediately after downing them.
+
+downstate_enemy_good:
+  title: "Good conversion of enemy downs"
+  cause: "{enemy_deaths} of {enemy_downs} enemy downs ({conversion}%) were turned into kills."
+  fix: "Keep it up."
+
+sustain_decline:
+  title: "Sustain ran out in the second half"
+  cause: >-
+    Healing + barrier covered {cover_first}% of damage taken in the first half, but only
+    {cover_second}% after {half_time}. Downs went from {downs_first} to {downs_second}. Top
+    healers: {top_healers}.
+  fix: >-
+    Pace the healers' cooldowns: don't spend every heal in the first exchange. Reset (pull back
+    and reapply boons) when sustain drops instead of staying in a long attrition fight.
+
+sustain_low:
+  title: "Not enough sustain for incoming damage"
+  cause: >-
+    Healing + barrier covered only {cover_all}% of the damage taken. Total healing: {healing}.
+    Top healers: {top_healers}.
+  fix: >-
+    Run more heal support or ask supports to switch to heal builds, and fight in shorter, burstier
+    engagements instead of long trades.
+
+comp_audit:
+  title: "Parties without support"
+  cause: "{gaps}. Downs in those parties: {downs}. Party compositions: {professions}."
+  fix: >-
+    Rebalance parties so each one has stability (firebrand), cleanses/healing (scrapper, tempest,
+    druid) and boons (herald, chrono). Move players into parties that have a support.
+
+comp_audit_loners:
+  title: "Players in tiny parties"
+  cause: "{players} players were in parties {parties}, which have fewer than 3 members and likely no support."
+  fix: "Invite those players into full parties that have a support, so they get boons and heals."
+
+outnumbered:
+  title: "Outnumbered ({ratio}x)"
+  cause: >-
+    The log saw {enemies} enemies against {squad} squad members and {allies} allies (ratio
+    {ratio}x).
+  fix: >-
+    Against bigger groups, fight at chokes, use siege or walls, and bait the enemy into splitting.
+    Avoid open-field fights unless your boons and timing are clearly better.
+
+player_outliers:
+  title: "Players underperforming in their role"
+  cause: "{count} player(s) were well below others of the same profession: {players}."
+  fix: >-
+    Check build and gear for these players and explain their job (strip timing, stab rotation,
+    staying on tag). Pair them with an experienced player of the same class.

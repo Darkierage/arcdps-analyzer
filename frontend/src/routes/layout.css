@@ -1,0 +1,81 @@
+@import 'tailwindcss';
+
+@theme {
+	--color-bg: #0a0d14;
+	--color-panel: #111621;
+	--color-panel-2: #161c2a;
+	--color-raised: #1c2335;
+	--color-line: #222a3d;
+	--color-line-2: #2c3550;
+	--color-text: #e7eaf2;
+	--color-muted: #8a93a8;
+	--color-faint: #5d6680;
+	--color-accent: #7c9cff;
+	--color-accent-2: #5b7cf0;
+
+	--color-win: #3ecf8e;
+	--color-loss: #f2555a;
+	--color-even: #f5b544;
+	--color-skirmish: #8a93a8;
+
+	--color-critical: #f2555a;
+	--color-major: #f59e42;
+	--color-minor: #e3c34f;
+	--color-info: #6fa8ff;
+	--color-positive: #3ecf8e;
+
+	--font-sans: 'Inter', 'Segoe UI Variable', 'Segoe UI', system-ui, -apple-system, sans-serif;
+	--font-mono: 'JetBrains Mono', 'Cascadia Code', ui-monospace, monospace;
+}
+
+:root {
+	color-scheme: dark;
+}
+
+html,
+body {
+	background: var(--color-bg);
+	color: var(--color-text);
+	font-family: var(--font-sans);
+	-webkit-font-smoothing: antialiased;
+}
+
+/* Thin, dark scrollbars (WebView2 / Chromium). */
+* {
+	scrollbar-width: thin;
+	scrollbar-color: var(--color-line-2) transparent;
+}
+
+.tabular {
+	font-variant-numeric: tabular-nums;
+}
+
+@layer components {
+	.card {
+		@apply rounded-xl border border-line bg-panel;
+	}
+	.btn {
+		@apply inline-flex items-center justify-center gap-2 rounded-lg border border-line-2 bg-raised px-3 py-1.5 text-sm font-medium text-text transition hover:border-accent/60 hover:bg-panel-2 disabled:cursor-not-allowed disabled:opacity-50;
+	}
+	.btn-primary {
+		@apply border-accent-2 bg-accent-2 text-white hover:border-accent hover:bg-accent;
+	}
+	.btn-danger {
+		@apply border-loss/50 bg-loss/15 text-loss hover:border-loss hover:bg-loss/25;
+	}
+	.btn-ghost {
+		@apply border-transparent bg-transparent hover:bg-raised;
+	}
+	.input {
+		@apply w-full rounded-lg border border-line-2 bg-bg px-3 py-1.5 text-sm text-text outline-none placeholder:text-faint focus:border-accent;
+	}
+	.label {
+		@apply mb-1 block text-xs font-medium tracking-wide text-muted uppercase;
+	}
+	.chip {
+		@apply inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium;
+	}
+	.section-title {
+		@apply text-xs font-semibold tracking-wider text-muted uppercase;
+	}
+}
