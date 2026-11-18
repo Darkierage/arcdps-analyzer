@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.concurrency import run_in_threadpool
@@ -21,6 +22,7 @@ from ..detectors import registry
 from ..metrics.aggregate import aggregate_session
 from ..notes import templates
 from ..state import AppState
+from ..store.files import remove_fight_files
 
 log = logging.getLogger(__name__)
 
@@ -67,6 +69,30 @@ def _split_debrief(text: str | None) -> tuple[str | None, list[str]]:
     return text, []
 
 
+# The API only serves this machine. Requests must address a local host name (blocks DNS
+# rebinding), and state-changing requests / the WebSocket must come from a local page (blocks
+# other websites in the user's browser from driving the app). Requests without an Origin header
+# (the app's own window loading pages, local scripts) are allowed.
+LOCAL_NAMES = {"127.0.0.1", "localhost", "::1"}
+TEST_HOST = "testserver"  # starlette TestClient
+SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+
+
+def _host_ok(host_header: str) -> bool:
+    host = host_header.strip().lower()
+    if host.startswith("["):  # [::1]:8765
+        host = host[1:].split("]")[0]
+    else:
+        host = host.rsplit(":", 1)[0] if host.count(":") == 1 else host
+    return host in LOCAL_NAMES or host == TEST_HOST
+
+
+def _origin_ok(origin: str | None) -> bool:
+    if origin is None:
+        return True
+    return (urlparse(origin).hostname or "") in LOCAL_NAMES
+
+
 def create_app(state: AppState) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -76,6 +102,14 @@ def create_app(state: AppState) -> FastAPI:
         await run_in_threadpool(state.stop)
 
     app = FastAPI(title="WvW Analyzer", version=__version__, lifespan=lifespan)
+
+    @app.middleware("http")
+    async def local_only(request: Request, call_next):
+        if not _host_ok(request.headers.get("host", "")):
+            return JSONResponse({"detail": "Forbidden host"}, status_code=403)
+        if request.method not in SAFE_METHODS and not _origin_ok(request.headers.get("origin")):
+            return JSONResponse({"detail": "Forbidden origin"}, status_code=403)
+        return await call_next(request)
 
     # ---- status -----------------------------------------------------------------------
     @app.get("/api/status")
@@ -110,6 +144,16 @@ def create_app(state: AppState) -> FastAPI:
                 folder=Path(body.folder) if body.folder else None,
                 since=_day_ts(body.since), until=_day_ts(body.until, end=True),
                 files=body.files)
+        except (RuntimeError, ValueError, OSError) as e:
+            raise HTTPException(400, str(e)) from e
+
+    @app.post("/api/import/preview")
+    def import_preview(body: ImportRequest) -> dict[str, Any]:
+        """Counts for the confirmation dialog before a date-range import."""
+        try:
+            return state.recorder.preview_import(
+                folder=Path(body.folder) if body.folder else None,
+                since=_day_ts(body.since), until=_day_ts(body.until, end=True))
         except (RuntimeError, ValueError, OSError) as e:
             raise HTTPException(400, str(e)) from e
 
@@ -162,7 +206,7 @@ def create_app(state: AppState) -> FastAPI:
     def delete_session(session_id: int) -> dict[str, bool]:
         if state.recorder.session_id == session_id:
             raise HTTPException(400, "Stop recording before deleting this session")
-        state.db.delete_session(session_id)
+        remove_fight_files(state.db.delete_session(session_id), state.db)
         return {"ok": True}
 
     # ---- fights -----------------------------------------------------------------------
@@ -199,7 +243,7 @@ def create_app(state: AppState) -> FastAPI:
 
     @app.delete("/api/fights/{fight_id}")
     def delete_fight(fight_id: int) -> dict[str, bool]:
-        state.db.delete_fight(fight_id)
+        remove_fight_files(state.db.delete_fight(fight_id), state.db)
         return {"ok": True}
 
     @app.post("/api/fights/{fight_id}/debrief")
@@ -247,6 +291,10 @@ def create_app(state: AppState) -> FastAPI:
     # ---- live events ------------------------------------------------------------------
     @app.websocket("/ws")
     async def ws(socket: WebSocket) -> None:
+        if not (_host_ok(socket.headers.get("host", ""))
+                and _origin_ok(socket.headers.get("origin"))):
+            await socket.close(code=1008)  # policy violation: not a local page
+            return
         await socket.accept()
         q = state.bus.subscribe()
         try:

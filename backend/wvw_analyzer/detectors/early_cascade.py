@@ -49,6 +49,6 @@ class EarlyCascade(Detector):
                 "enemy_downs": enemy_before,
                 "with_stab": stab_ok,
                 "since_engage": round(t_first - tl.engage_start, 1),
-                "players": ", ".join(e["player"] for e in early[:5]),
+                "players": ", ".join(dict.fromkeys(e["player"] for e in early[:6])),
             },
         )]

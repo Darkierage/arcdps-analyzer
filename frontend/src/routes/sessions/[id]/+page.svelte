@@ -54,7 +54,7 @@
 	}
 
 	async function remove() {
-		if (!confirm('Delete this session and its fights from the app? Log files are not deleted.')) return;
+		if (!confirm('Delete this session and its fights from the app? Their parsed data is deleted; your arcdps log files are kept.')) return;
 		try {
 			await api.deleteSession(id);
 			goto('/sessions');
@@ -73,7 +73,7 @@
 	const boardFmt = (key: string) => agg?.columns.find((c) => c.key === key)?.fmt ?? 'num';
 </script>
 
-<div class="mx-auto max-w-7xl px-6 py-6">
+<div class="page">
 	<a href="/sessions" class="mb-4 inline-flex items-center gap-1.5 text-sm text-muted hover:text-text">
 		<Icon name="back" class="size-4" /> Sessions
 	</a>

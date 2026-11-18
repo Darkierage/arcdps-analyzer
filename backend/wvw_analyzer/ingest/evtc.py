@@ -22,17 +22,29 @@ def _species_from_header(head: bytes) -> int | None:
 
 
 def species_id(source: Path | bytes) -> int | None:
-    """Encounter species id of a log file or its bytes; None if unreadable."""
+    """Encounter species id of a log file or its bytes; None if unreadable.
+
+    For files only the first bytes are read (the zip entry is opened lazily), so checking a
+    whole arcdps folder stays cheap.
+    """
     try:
-        raw = source if isinstance(source, bytes) else Path(source).read_bytes()
-        if raw[:4] == b"EVTC":
-            return _species_from_header(raw[:16])
-        with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+        if isinstance(source, bytes):
+            if source[:4] == b"EVTC":
+                return _species_from_header(source[:16])
+            fh_src: io.BytesIO | Path = io.BytesIO(source)
+        else:
+            path = Path(source)
+            with open(path, "rb") as fh:
+                head = fh.read(16)
+            if head[:4] == b"EVTC":
+                return _species_from_header(head)
+            fh_src = path
+        with zipfile.ZipFile(fh_src) as zf:
             names = zf.namelist()
             if not names:
                 return None
-            with zf.open(names[0]) as fh:
-                return _species_from_header(fh.read(16))
+            with zf.open(names[0]) as entry:
+                return _species_from_header(entry.read(16))
     except (OSError, zipfile.BadZipFile, struct.error):
         return None
 

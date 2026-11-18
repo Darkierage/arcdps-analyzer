@@ -90,7 +90,7 @@
 	}
 
 	async function remove() {
-		if (!confirm('Remove this fight from the app? The log file is not deleted.')) return;
+		if (!confirm('Remove this fight from the app? Its parsed data is deleted; your arcdps log file is kept.')) return;
 		await api.deleteFight(id);
 		goto('/');
 	}
@@ -108,7 +108,7 @@
 	}
 </script>
 
-<div class="mx-auto max-w-7xl px-6 py-6">
+<div class="page">
 	<a href="/" class="mb-4 inline-flex items-center gap-1.5 text-sm text-muted hover:text-text">
 		<Icon name="back" class="size-4" /> Fights
 	</a>
@@ -331,8 +331,9 @@
 				{:else if tab === 'boons'}
 					<StatTable columns={cols('boons', boonGroup)} players={stats.players} parties={stats.parties} squad={stats.squad} {mode} {hideAbsent} />
 					<p class="mt-2 text-xs text-faint">
-						Uptime in % (stability and might also as average stacks). Generation: average boon uptime this player
-						gave per target in the group (stacks for stability/might).
+						Uptime: % of time the player had the boon (stability and might also as average stacks). Generation:
+						what this player gave each target in the group - % of time, and for stability/might also the average
+						stacks. Party and squad rows add up their members.
 					</p>
 				{:else if tab === 'positioning'}
 					<StatTable columns={[...cols('positioning'), overviewCols.find((c) => c.key === 'fight_dist_tag')!]} players={stats.players} parties={stats.parties} squad={stats.squad} {mode} {hideAbsent} />

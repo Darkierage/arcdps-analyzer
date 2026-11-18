@@ -18,7 +18,7 @@
 				<div class="grid size-9 place-items-center rounded-full bg-major/15">
 					<Icon name="alert" class="size-5 text-major" />
 				</div>
-				<h2 id="ic-title" class="text-base font-semibold">Import {plan.files.length} logs?</h2>
+				<h2 id="ic-title" class="text-base font-semibold">Import {plan.count} logs?</h2>
 			</div>
 			<p class="text-sm text-muted">
 				This is more than {CONFIRM_THRESHOLD} logs, so it will take a while. Logs are processed one at a time
@@ -26,10 +26,14 @@
 			</p>
 			<dl class="tabular my-4 grid grid-cols-2 gap-x-4 gap-y-2 rounded-lg bg-panel-2 p-3 text-sm">
 				<dt class="text-muted">New logs</dt>
-				<dd class="text-right font-medium">{plan.files.length}</dd>
+				<dd class="text-right font-medium">{plan.count}</dd>
 				{#if plan.known}
 					<dt class="text-muted">Already imported</dt>
 					<dd class="text-right text-faint">{plan.known} (skipped)</dd>
+				{/if}
+				{#if plan.notWvw}
+					<dt class="text-muted">Not WvW (PvE, golem)</dt>
+					<dd class="text-right text-faint">{plan.notWvw} (skipped)</dd>
 				{/if}
 				<dt class="text-muted">Dates</dt>
 				<dd class="text-right">{fmt(plan.from)} – {fmt(plan.to)}</dd>
@@ -45,7 +49,7 @@
 			<div class="flex justify-end gap-2">
 				<button class="btn" onclick={() => importer.cancel()}>Cancel</button>
 				<button class="btn btn-primary" onclick={() => importer.confirm()}>
-					<Icon name="upload" class="size-4" /> Import {plan.files.length} logs
+					<Icon name="upload" class="size-4" /> Import {plan.count} logs
 				</button>
 			</div>
 		</div>

@@ -51,6 +51,10 @@ body {
 }
 
 @layer components {
+	/* One page container for every screen, so switching pages or tabs never changes the width. */
+	.page {
+		@apply mx-auto w-full max-w-[1920px] px-6 py-6;
+	}
 	.card {
 		@apply rounded-xl border border-line bg-panel;
 	}

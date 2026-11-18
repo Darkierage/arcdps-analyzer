@@ -118,9 +118,14 @@ class Database:
     def rename_session(self, session_id: int, name: str) -> None:
         self._exec("UPDATE sessions SET name=? WHERE id=?", (name, session_id))
 
-    def delete_session(self, session_id: int) -> None:
-        self._exec("DELETE FROM fights WHERE session_id=?", (session_id,))
-        self._exec("DELETE FROM sessions WHERE id=?", (session_id,))
+    def delete_session(self, session_id: int) -> list[dict[str, Any]]:
+        """Delete a session and its fights; returns the removed fight rows (for file cleanup)."""
+        with self._lock:
+            rows = self._all("SELECT id, log_path, ei_json FROM fights WHERE session_id=?",
+                             (session_id,))
+            self._exec("DELETE FROM fights WHERE session_id=?", (session_id,))
+            self._exec("DELETE FROM sessions WHERE id=?", (session_id,))
+        return rows
 
     def session(self, session_id: int) -> dict[str, Any] | None:
         return self._one("SELECT * FROM sessions WHERE id=?", (session_id,))
@@ -263,8 +268,39 @@ class Database:
                 out[r["log_name"]] = r["id"]
         return out
 
-    def delete_fight(self, fight_id: int) -> None:
-        self._exec("DELETE FROM fights WHERE id=?", (fight_id,))
+    def delete_fight(self, fight_id: int) -> list[dict[str, Any]]:
+        """Delete a fight; returns the removed row (for file cleanup)."""
+        with self._lock:
+            rows = self._all("SELECT id, log_path, ei_json FROM fights WHERE id=?", (fight_id,))
+            self._exec("DELETE FROM fights WHERE id=?", (fight_id,))
+        return rows
+
+    def stale_fight_ids(self, version: int) -> list[int]:
+        """Analyzed fights whose stored analysis came from a different analyzer version."""
+        out = []
+        for r in self._all("SELECT id, summary FROM fights WHERE status='done'"):
+            summary = json.loads(r["summary"]) if r["summary"] else {}
+            if summary.get("analyzerVersion") != version:
+                out.append(r["id"])
+        return out
+
+    def fights_needing_debrief(self, limit: int = 20) -> list[int]:
+        """Analyzed fights of the most recent recording session that have no debrief yet."""
+        row = self._one("SELECT id FROM sessions WHERE kind='recording' "
+                        "ORDER BY started_at DESC, id DESC LIMIT 1")
+        if not row:
+            return []
+        return [r["id"] for r in self._all(
+            """SELECT f.id FROM fights f JOIN analyses a ON a.fight_id = f.id
+               WHERE f.session_id=? AND f.status='done' AND a.debrief IS NULL
+               ORDER BY f.fight_start LIMIT ?""", (row["id"], limit))]
+
+    def referenced_files(self) -> set[str]:
+        """Every EI JSON and log path still used by a fight."""
+        out: set[str] = set()
+        for r in self._all("SELECT log_path, ei_json FROM fights"):
+            out.update(v for v in (r["log_path"], r["ei_json"]) if v)
+        return out
 
     def all_fight_ids(self, statuses: tuple[str, ...] = ("done", "skipped", "failed")
                       ) -> list[int]:

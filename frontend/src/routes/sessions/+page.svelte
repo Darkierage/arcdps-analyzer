@@ -38,7 +38,7 @@
 	}
 </script>
 
-<div class="mx-auto max-w-6xl px-6 py-6">
+<div class="page">
 	<h1 class="text-xl font-semibold">Sessions</h1>
 	<p class="mt-0.5 mb-5 text-sm text-muted">Each recording, or each imported day, is one raid session.</p>
 

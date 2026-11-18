@@ -6,7 +6,9 @@
 	import Icon from './Icon.svelte';
 
 	let { open = $bindable(false) }: { open: boolean } = $props();
-	const today = new Date().toISOString().slice(0, 10);
+	// Local date (toISOString would give the UTC date, wrong near midnight).
+	const now = new Date();
+	const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 	let mode = $state<'files' | 'range'>('files');
 	let folder = $state('');
 	let since = $state(today);
@@ -37,19 +39,9 @@
 	}
 
 	async function submitRange() {
-		const r = await api.importLogs({
-			folder: folder.trim() || undefined,
-			since: since || undefined,
-			until: until || undefined
-		});
-		toasts.push(
-			r.added
-				? `Queued ${r.added} log${r.added === 1 ? '' : 's'} for analysis` +
-						(r.alreadyKnown ? ` (${r.alreadyKnown} already imported)` : '')
-				: `No new logs found (${r.alreadyKnown} already imported)`,
-			r.added ? 'success' : 'info'
-		);
+		const body = { folder: folder.trim() || undefined, since: since || undefined, until: until || undefined };
 		close();
+		await importer.startRange(body); // preview, confirm if more than 20 new logs, import
 	}
 
 	async function submitFiles() {

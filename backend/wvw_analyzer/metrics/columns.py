@@ -82,12 +82,14 @@ def _uptime(buff_id: int, presence: bool = False) -> Callable[[Player], float]:
     return get
 
 
-def _generation(buff_id: int, source: str) -> Callable[[Player], float]:
+def _generation(buff_id: int, source: str, field: str = "generation"
+                ) -> Callable[[Player], float]:
+    """EI generation value; for stacking boons 'generationPresence' is the uptime share in %."""
     def get(p: Player) -> float:
         b = p.buff(buff_id, source)
         if not b:
             return 0.0
-        return float((b.get("buffData") or [{}])[0].get("generation", 0) or 0)
+        return float((b.get("buffData") or [{}])[0].get(field, 0) or 0)
 
     return get
 
@@ -187,9 +189,20 @@ def _boon_columns() -> list[Column]:
     for source, label in [("selfBuffs", "Self"), ("groupBuffs", "Group"),
                           ("offGroupBuffs", "Off-group"), ("squadBuffs", "Squad")]:
         for bid, name in BOONS.items():
-            fmt: Fmt = "stacks" if bid in INTENSITY_BOONS else "pct"
-            cols.append(Column(f"gen_{source}_{bid}", name, "boons", _generation(bid, source),
-                               agg="sum", fmt=fmt, group=f"{label} generation"))
+            group = f"{label} generation"
+            if bid in INTENSITY_BOONS:
+                cols.append(Column(
+                    f"gen_{source}_{bid}_pct", f"{name} %", "boons",
+                    _generation(bid, source, "generationPresence"), agg="sum", fmt="pct",
+                    group=group,
+                    description=f"Share of time this player's {name.lower()} was on the targets."))
+                cols.append(Column(
+                    f"gen_{source}_{bid}", f"{name} stacks", "boons", _generation(bid, source),
+                    agg="sum", fmt="stacks", group=group,
+                    description=f"Average {name.lower()} stacks this player kept on each target."))
+            else:
+                cols.append(Column(f"gen_{source}_{bid}", name, "boons",
+                                   _generation(bid, source), agg="sum", fmt="pct", group=group))
     return cols
 
 

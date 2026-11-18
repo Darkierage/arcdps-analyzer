@@ -7,7 +7,6 @@ compete with the game.
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import re
@@ -24,36 +23,14 @@ import httpx
 from .. import tools
 from ..config import ConfigStore
 from ..events import EventBus
+from . import prompts
 
 log = logging.getLogger(__name__)
-
-SYSTEM_PROMPT = (
-    "You are an experienced Guild Wars 2 WvW commander writing a short post-fight debrief for "
-    "your squad. Use ONLY the facts and numbers given in the input; never invent numbers, "
-    "players or events. Write in plain English: one sentence on the outcome, then 'Why' with "
-    "the 2-3 most important causes, then 'Change next time' with 2-3 concrete actions, then "
-    "one line on what went well if anything did. Keep it under 180 words. /no_think"
-)
-
 
 def _free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         return int(s.getsockname()[1])
-
-
-def build_prompt(summary: dict[str, Any], notes: dict[str, Any]) -> str:
-    keep = ["map", "durationS", "result", "squadCount", "squadInFight", "allyCount",
-            "enemyCount", "squadDowns", "squadDeaths", "enemyDowns", "enemyDeaths",
-            "squadStrips", "squadBoonsLost", "squadCleanses"]
-    payload = {
-        "fight": {k: summary.get(k) for k in keep},
-        "problems": [{"title": f["title"], "what_happened": f["cause"],
-                      "suggested_fix": f["fix"]} for f in notes.get("issues", [])[:5]],
-        "went_well": [{"title": f["title"], "detail": f["cause"]}
-                      for f in notes.get("positives", [])],
-    }
-    return json.dumps(payload, ensure_ascii=False, indent=1)
 
 
 _NUM = re.compile(r"\d+(?:[.,]\d+)?")
@@ -203,7 +180,8 @@ class LlmService:
     # ---- generation -----------------------------------------------------------------------
     def debrief(self, summary: dict[str, Any], notes: dict[str, Any]) -> dict[str, Any]:
         s = self.config.settings.llm
-        prompt = build_prompt(summary, notes)
+        variant = s.prompt if s.prompt in prompts.VARIANTS else prompts.DEFAULT
+        msgs, prompt = prompts.messages(variant, summary, notes)
         with self._lock:
             self.busy = True
             self._emit()
@@ -212,9 +190,8 @@ class LlmService:
                     self._start()
                 r = httpx.post(
                     f"http://127.0.0.1:{self._port}/v1/chat/completions",
-                    json={"messages": [{"role": "system", "content": SYSTEM_PROMPT},
-                                       {"role": "user", "content": prompt}],
-                          "max_tokens": s.max_tokens, "temperature": 0.3,
+                    json={"messages": msgs,
+                          "max_tokens": s.max_tokens, "temperature": s.temperature,
                           "chat_template_kwargs": {"enable_thinking": False}},
                     timeout=600,
                 )
@@ -225,4 +202,5 @@ class LlmService:
                 self._last_used = time.time()
                 self._emit()
         text = re.sub(r"<think>.*?</think>", "", text, flags=re.S).strip()
+        text = prompts.finalize(variant, summary, text, notes)
         return {"text": text, "unverified": unverified_numbers(text, prompt)}

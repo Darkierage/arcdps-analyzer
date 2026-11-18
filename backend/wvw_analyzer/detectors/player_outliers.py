@@ -98,6 +98,8 @@ class PlayerOutliers(Detector):
             impact=min(len(flagged) * 0.3, 2.0),
             subjects=[f.split(" (")[0] for f in flagged],
             evidence={"count": len(flagged),
+                      "count_txt": "1 player was" if len(flagged) == 1
+                      else f"{len(flagged)} players were",
                       "players": "; ".join(flagged[: self.cfg["max_listed"]])},
         )]
 

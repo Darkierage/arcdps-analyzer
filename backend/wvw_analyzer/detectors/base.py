@@ -23,6 +23,8 @@ class Finding(BaseModel):
     title: str = ""
     cause: str = ""
     fix: str = ""
+    short: str = ""  # one-line fact for chat / the LLM debrief
+    fix_short: str = ""
     related: list[str] = Field(default_factory=list)  # titles of merged findings
 
 

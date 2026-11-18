@@ -69,7 +69,9 @@
 	const llm = $derived(live.llm);
 </script>
 
-<div class="mx-auto max-w-4xl px-6 py-6" oninput={() => (dirty = true)} onchange={() => (dirty = true)}>
+<!-- Same page container as everywhere else; the form itself stays a readable width. -->
+<div class="page" oninput={() => (dirty = true)} onchange={() => (dirty = true)}>
+<div class="max-w-4xl">
 	<div class="sticky top-0 z-10 -mx-6 mb-5 flex items-center gap-3 bg-bg/90 px-6 py-3 backdrop-blur">
 		<h1 class="text-xl font-semibold">Settings</h1>
 		{#if dirty}<span class="chip bg-major/15 text-major">Unsaved changes</span>{/if}
@@ -232,4 +234,5 @@
 			</div>
 		</section>
 	{/if}
+</div>
 </div>

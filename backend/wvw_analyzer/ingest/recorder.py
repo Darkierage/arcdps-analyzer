@@ -75,6 +75,8 @@ class Recorder:
         self._lock = threading.Lock()
         self._watch: threading.Thread | None = None
         self._index: tuple[float, dict[str, tuple[Path, int]]] | None = None
+        self._game_running = False
+        self._auto_suppressed = False  # user pressed Stop while the game was running
 
     # ---- recording ---------------------------------------------------------------------
     @property
@@ -113,8 +115,11 @@ class Recorder:
         self._emit()
         return self.state()
 
-    def stop(self) -> dict[str, Any]:
+    def stop(self, manual: bool = True) -> dict[str, Any]:
+        """Stop recording. A manual stop also pauses auto-record until the game is closed."""
         with self._lock:
+            if manual and self._game_running:
+                self._auto_suppressed = True
             if not self.recording:
                 return self.state()
             self._stop.set()
@@ -161,9 +166,9 @@ class Recorder:
                     self._emit()
 
     # ---- manual import -----------------------------------------------------------------
-    def import_logs(self, folder: Path | None = None, since: float | None = None,
-                    until: float | None = None, files: list[str] | None = None) -> dict[str, int]:
-        """Queue existing logs; sessions are grouped by the log's date (one per raid day)."""
+    def _import_candidates(self, folder: Path | None, since: float | None,
+                           until: float | None, files: list[str] | None) -> dict[str, Any]:
+        """Split logs into new WvW logs, already imported ones and non-WvW ones."""
         if files:
             items = [(Path(f), Path(f).stat()) for f in files if Path(f).is_file()]
         else:
@@ -171,17 +176,37 @@ class Recorder:
             if not root or not root.is_dir():
                 raise RuntimeError(f"Folder not found: {root}")
             items = list(iter_logs(root, since=since, until=until))
-        known = self.db.known_paths()
-        added = skipped = 0
-        fight_ids: list[int] = []
-        sessions: dict[str, int] = {}
+        known_paths = self.db.known_paths()
+        known_names = self.db.fights_by_names([p.name for p, _ in items])
+        new, known, not_wvw = [], [], 0
         for path, st in sorted(items, key=lambda x: x[1].st_mtime):
-            if str(path) in known:
-                skipped += 1
-                existing_fight = self.db.fight_by_path(str(path))
-                if existing_fight:
-                    fight_ids.append(existing_fight["id"])
-                continue
+            if str(path) in known_paths or path.name in known_names:
+                fight = self.db.fight_by_path(str(path))
+                known.append(fight["id"] if fight else known_names.get(path.name))
+            elif is_wvw_log(path) is False:  # PvE / golem logs never become fights
+                not_wvw += 1
+            else:
+                new.append((path, st))
+        return {"new": new, "known": [k for k in known if k], "not_wvw": not_wvw}
+
+    def preview_import(self, folder: Path | None = None, since: float | None = None,
+                       until: float | None = None) -> dict[str, Any]:
+        """What an import would do, without changing anything (for the confirmation)."""
+        c = self._import_candidates(folder, since, until, None)
+        days = sorted({_log_day(p, st.st_mtime) for p, st in c["new"]})
+        return {"new": len(c["new"]), "alreadyKnown": len(c["known"]),
+                "notWvw": c["not_wvw"], "days": len(days),
+                "from": days[0] if days else None, "to": days[-1] if days else None}
+
+    def import_logs(self, folder: Path | None = None, since: float | None = None,
+                    until: float | None = None, files: list[str] | None = None
+                    ) -> dict[str, Any]:
+        """Queue existing WvW logs; sessions are grouped by the log's date (one per raid day)."""
+        c = self._import_candidates(folder, since, until, files)
+        fight_ids: list[int] = list(c["known"])
+        sessions: dict[str, int] = {}
+        added = 0
+        for path, st in c["new"]:
             day = _log_day(path, st.st_mtime)
             if day not in sessions:
                 name = f"Import {day}"
@@ -195,7 +220,8 @@ class Recorder:
                 self.processor.enqueue(fid, cancellable=True)
         for sid in sessions.values():
             self.db.end_session(sid)
-        return {"added": added, "alreadyKnown": skipped, "fightIds": fight_ids}
+        return {"added": added, "alreadyKnown": len(c["known"]), "notWvw": c["not_wvw"],
+                "fightIds": fight_ids}
 
     def store_upload(self, filename: str, data: bytes) -> Path | None:
         """Place an uploaded log where import can read it; None if it isn't a WvW log.
@@ -251,11 +277,14 @@ class Recorder:
                 continue
             running = any((p.info.get("name") or "").lower() == GW2_PROCESS
                           for p in psutil.process_iter(["name"]))
+            self._game_running = running
+            if not running:
+                self._auto_suppressed = False  # next game launch may auto-start again
             try:
-                if running and not self.recording:
+                if running and not self.recording and not self._auto_suppressed:
                     self.start(auto=True)
                 elif not running and self.recording and self.auto_started:
-                    self.stop()
+                    self.stop(manual=False)
             except Exception:
                 log.exception("auto record toggle failed")
 

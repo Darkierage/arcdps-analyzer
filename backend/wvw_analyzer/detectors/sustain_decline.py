@@ -19,6 +19,7 @@ class SustainDecline(Detector):
         "min_engage_s": 30.0,
         "drop": 0.35,  # relative drop of (heal+barrier)/damage-taken from first to second half
         "low_cover": 0.35,  # heal+barrier covering less than this share of damage overall
+        "min_second_half_downs": 3,  # the decline must actually cost players
     }
 
     def detect(self, m: Metrics) -> list[Finding]:
@@ -52,7 +53,8 @@ class SustainDecline(Detector):
                                      for r in healers if r["healing"] > 0),
             "half_time": f"{mid // 60}:{mid % 60:02d}",
         }
-        if c1 and c2 is not None and (c1 - c2) / c1 >= self.cfg["drop"] and downs2 > downs1:
+        if c1 and c2 is not None and (c1 - c2) / c1 >= self.cfg["drop"] and downs2 > downs1 \
+                and downs2 >= self.cfg["min_second_half_downs"]:
             return [self.finding("major", impact=(downs2 - downs1) * 0.6, window=(mid, e1),
                                  evidence=ev)]
         if call is not None and call < self.cfg["low_cover"] and s["squadDowns"] >= 5:

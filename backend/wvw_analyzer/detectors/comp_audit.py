@@ -18,6 +18,7 @@ class CompAudit(Detector):
         "low_stab_coverage": 0.25,
         "min_party_size": 3,  # parties smaller than this count as 'unsupported'
         "low_cleanse_share": 0.25,  # party cleanses vs the average party
+        "min_avg_cleanses": 10,  # ignore cleanses when there was hardly anything to cleanse
     }
 
     def detect(self, m: Metrics) -> list[Finding]:
@@ -33,7 +34,8 @@ class CompAudit(Detector):
             missing = []
             if cov is not None and cov < self.cfg["low_stab_coverage"]:
                 missing.append(f"little stability ({pct(cov)}% coverage)")
-            if avg_cleanse and p["cleanses"] < self.cfg["low_cleanse_share"] * avg_cleanse:
+            if avg_cleanse >= self.cfg["min_avg_cleanses"] and \
+                    p["cleanses"] < self.cfg["low_cleanse_share"] * avg_cleanse:
                 missing.append(f"low cleanses ({int(p['cleanses'])} vs {int(avg_cleanse)} avg)")
             if m.summary["hasHealData"] and p["healing"] <= 0:
                 missing.append("no healing")
@@ -48,6 +50,9 @@ class CompAudit(Detector):
                 impact=sum(d for _, _, d, _ in gaps) * 0.25,
                 subjects=[f"Party {g}" for g, *_ in gaps],
                 evidence={"gaps": lines, "parties": ", ".join(str(g) for g, *_ in gaps),
+                          "parties_short": _short_list([str(g) for g, *_ in gaps]),
+                          "party_word": "party" if len(gaps) == 1 else "parties",
+                          "lacking": _lacking(gaps),
                           "downs": sum(d for _, _, d, _ in gaps),
                           "professions": " | ".join(
                               f"{g}: {', '.join(pr)}" for g, _, _, pr in gaps)},
@@ -59,6 +64,22 @@ class CompAudit(Detector):
                 "minor", key="comp_audit_loners", impact=loners * 0.2,
                 subjects=[f"Party {p['group']}" for p in small],
                 evidence={"players": loners,
+                          "players_txt": "1 player sat" if loners == 1
+                          else f"{loners} players sat",
+                          "party_word": "party" if len(small) == 1 else "parties",
                           "parties": ", ".join(str(p["group"]) for p in small)},
             ))
         return out
+
+
+def _lacking(gaps: list) -> str:
+    kinds = []
+    for word in ("stability", "cleanses", "healing"):
+        if any(word in m for _, missing, _, _ in gaps for m in missing):
+            kinds.append(word)
+    return " / ".join(kinds) or "support"
+
+
+def _short_list(items: list[str], keep: int = 4) -> str:
+    return ", ".join(items) if len(items) <= keep else (
+        f"{', '.join(items[:keep])} and {len(items) - keep} more")

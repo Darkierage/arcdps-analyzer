@@ -22,6 +22,7 @@ class Outnumbered(Detector):
         return [self.finding(
             severity,
             impact=(3.0 if hard else 1.0) if s["result"] in ("loss", "even") else 0.5,
-            evidence={"enemies": s["enemyCount"], "squad": s["squadCount"],
-                      "allies": s["allyCount"], "ratio": ratio},
+            evidence={"enemies": s["enemyCount"], "squad": s.get("squadInFight") or s["squadCount"],
+                      "allies": s["allyCount"], "ratio": ratio,
+                      "allies_txt": f" and {s['allyCount']} allies" if s["allyCount"] else ""},
         )]

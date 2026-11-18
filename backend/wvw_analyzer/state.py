@@ -7,12 +7,14 @@ import logging
 import threading
 import time
 
+from .analysis import ANALYZER_VERSION
 from .config import ConfigStore
 from .events import EventBus
 from .ingest.processor import Processor
 from .ingest.recorder import Recorder
 from .llm.manager import LlmService
 from .store.db import Database
+from .store.files import cleanup_orphans
 
 log = logging.getLogger(__name__)
 
@@ -26,10 +28,20 @@ class AppState:
         self.recorder = Recorder(self.db, self.config, self.bus, self.processor)
         self.llm = LlmService(self.config, self.bus)
         self._stop = threading.Event()
+        self._started_at = time.time()
 
     def start(self) -> None:
+        self._started_at = time.time()
         self.db.close_open_sessions()
+        cleanup_orphans(self.db)  # parsed files left behind by deleted fights
         self.processor.start()
+        # Fights analyzed by an older version of the analyzer get re-analyzed (from the cached
+        # Elite Insights JSON), so new stats columns and detector fixes apply everywhere.
+        stale = self.db.stale_fight_ids(ANALYZER_VERSION)
+        if stale:
+            log.info("re-analyzing %d fights from an older analyzer version", len(stale))
+            for fid in stale:
+                self.processor.enqueue(fid)
         self.recorder.start_auto_watch()
         threading.Thread(target=self._auto_debrief_loop, name="auto-debrief", daemon=True).start()
 
@@ -54,25 +66,34 @@ class AppState:
         return result
 
     def _auto_debrief_loop(self) -> None:
-        """Write debriefs once the raid is quiet (no new logs for quiet_minutes)."""
+        """Write debriefs for the latest recorded raid once it's quiet (no new log for a while).
+
+        Only fights of the most recent *recording* session are considered (not imported
+        history), the check is a cheap query, and failures back off instead of retrying every
+        poll.
+        """
+        backoff_until = 0.0
+        failures = 0
         while not self._stop.wait(30):
             s = self.config.settings.llm
             if not (s.enabled and s.auto_debrief) or self.llm.busy:
                 continue
-            last = self.processor.last_done_at
-            if not last or time.time() - last < s.quiet_minutes * 60:
+            now = time.time()
+            if now < backoff_until or self.processor.state()["pending"]:
                 continue
-            if self.processor.state()["pending"]:
+            last = self.processor.last_done_at or self._started_at
+            if now - last < s.quiet_minutes * 60:
                 continue
-            for f in self.db.fights(include_skipped=False, limit=50):
-                if f["status"] != "done":
-                    continue
-                a = self.db.analysis(f["id"])
-                if a and not a["debrief"]:
-                    try:
-                        self.write_debrief(f["id"])
-                    except Exception:
-                        log.exception("auto debrief failed for fight %s", f["id"])
-                        break
-                    if self.processor.state()["pending"]:
-                        break  # new fight arrived, back off
+            for fid in self.db.fights_needing_debrief(limit=20):
+                try:
+                    self.write_debrief(fid)
+                    failures = 0
+                except Exception as e:
+                    failures += 1
+                    delay = min(60 * 2 ** failures, 3600)
+                    backoff_until = time.time() + delay
+                    log.warning("auto debrief failed for fight %s (%s); retrying in %d min",
+                                fid, e, delay // 60)
+                    break
+                if self.processor.state()["pending"]:
+                    break  # a new fight arrived - the raid is not quiet any more

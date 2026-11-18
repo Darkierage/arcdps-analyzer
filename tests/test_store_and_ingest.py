@@ -95,3 +95,33 @@ def test_unverified_numbers():
     src = '{"deaths": 22, "coverage": 35, "dmg": "1.2M"}'
     assert unverified_numbers("22 deaths at 35% coverage, 3 bombs", src) == []
     assert unverified_numbers("47 deaths", src) == ["47"]
+
+
+def test_deleting_fights_removes_owned_files_only(tmp_path: Path):
+    from wvw_analyzer.store.files import cleanup_orphans, remove_fight_files
+
+    db = Database(tmp_path / "t.db")
+    (tmp_path / "ei").mkdir()
+    (tmp_path / "uploads").mkdir()
+    original = tmp_path / "arcdps" / "20261117-200000.zevtc"
+    original.parent.mkdir()
+    original.write_bytes(b"log")
+    upload = tmp_path / "uploads" / "20261117-210000.zevtc"
+    upload.write_bytes(b"log")
+    sid = db.create_session("Raid", "import")
+    f1 = db.add_fight(str(original), sid, 0)
+    f2 = db.add_fight(str(upload), sid, 0)
+    ei1, ei2 = tmp_path / "ei" / "a.json.gz", tmp_path / "ei" / "b.json.gz"
+    for f, ei in ((f1, ei1), (f2, ei2)):
+        ei.write_bytes(b"{}")
+        db.set_ei_json(f, str(ei))
+
+    remove_fight_files(db.delete_fight(f1), db)
+    assert not ei1.exists() and original.exists()  # arcdps log is never deleted
+    remove_fight_files(db.delete_session(sid), db)
+    assert not ei2.exists() and not upload.exists()
+
+    orphan = tmp_path / "ei" / "orphan.json.gz"
+    orphan.write_bytes(b"{}")
+    assert cleanup_orphans(db, min_age_s=0) == 1 and not orphan.exists()
+    assert (tmp_path / "arcdps").exists() and original.exists()

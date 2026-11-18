@@ -1,9 +1,12 @@
 # Note templates for detector findings.
 # {placeholders} are filled from the finding's evidence. Copy this file to
 # <data dir>/templates.yaml and edit it to customize the wording for your guild;
-# keys you leave out fall back to these defaults.
+# keys you leave out fall back to these defaults. 'short' / 'fix_short' are the one-line
+# versions used for the chat debrief (LLM input).
 
 stab_gap_deaths:
+  short: '{downs} downed in one burst, {deaths} of them died; stab was low in party {parties}.{repeat_txt}'
+  fix_short: Stagger firebrands and hold stab for the enemy push.
   title: "Stability gap during enemy bomb ({time})"
   cause: >-
     At {time}, {downs} players went down in one burst ({deaths} died). Stability coverage just
@@ -14,7 +17,23 @@ stab_gap_deaths:
     one holds for the enemy bomb), call stab right before contact, and re-stab after the first
     exchange.
 
+stab_gap_deaths_nostab:
+  short: '{downs} downed in one burst, {deaths} of them died; {nostab} had no stab even though their parties had stab just before (stripped or ran out).{repeat_txt}'
+  fix_short: Re-apply stab right after their strips, before their bomb.
+  title: "Players went down without stability ({time})"
+  cause: >-
+    At {time}, {downs} players went down in one burst ({deaths} died). {nostab} of them had no
+    stability at that moment, even though their parties' coverage was {parties} just before, so
+    stability was likely stripped or ran out right as the enemy bomb hit. This happened
+    {bombs} time(s) this fight ({bomb_times}).
+  fix: >-
+    Time stability for the moment of contact, not the approach: re-apply it right after the
+    enemy's strip/corrupt skills and before their damage bomb, and keep a second firebrand's stab
+    in reserve for that window.
+
 boon_wipe:
+  short: '{time}: our boons dropped from {before} to {after} per player and {downs} downs followed.'
+  fix_short: Re-apply boons right after their strip bomb; use aegis and blocks.
   title: "Enemy strip/corrupt bomb landed ({time})"
   cause: >-
     At {time} the squad's average boons dropped from {before} to {after} per player within
@@ -26,6 +45,8 @@ boon_wipe:
     corrupt/well fields while boonless; move the blob out, then re-engage.
 
 strip_balance:
+  short: 'we lost {boons_lost} boons to strips and stripped {strips}; real strippers: {strippers}.'
+  fix_short: More strip builds; strip right before our bomb.
   title: "Losing the strip war"
   cause: >-
     Enemies removed {boons_lost} boons from the squad, while the squad stripped {strips}
@@ -37,11 +58,14 @@ strip_balance:
     protection when the burst hits.
 
 strip_balance_good:
+  short: we stripped {strips} boons and lost {boons_lost}.
   title: "Won the strip war"
   cause: "The squad stripped {strips} boons and lost only {boons_lost}. Top strippers: {top_strippers}."
   fix: "Keep it up."
 
 out_of_position:
+  short: '{far_downs} of {downs} downs happened far from the tag or the stack.'
+  fix_short: Stay within about {far_tag} of the tag; stop chasing.
   title: "Players caught away from the tag"
   cause: >-
     {far_downs} of {downs} downs ({share}%) happened far from the commander or the stack (median
@@ -52,6 +76,8 @@ out_of_position:
     blob.
 
 early_cascade:
+  short: '{downs} downed within {seconds}s from {time}; enemy downs by then: {enemy_downs}.'
+  fix_short: Engage only with full boons, pre-stacked on the tag.
   title: "Lost the opening exchange"
   cause: >-
     {downs} players went down within {seconds}s starting at {time} ({since_engage}s into the
@@ -63,6 +89,8 @@ early_cascade:
     until their cooldowns are used.
 
 cleanse_pressure:
+  short: players carried {avg_conditions} conditions on average; {downs_high_condi} downs happened with {down_conditions}+ conditions.
+  fix_short: More resistance and burst cleanses for their condi bomb.
   title: "Condition pressure overwhelmed cleanses"
   cause: >-
     Players carried {avg_conditions} conditions on average during the fight (peak
@@ -75,6 +103,8 @@ cleanse_pressure:
     enemy condition fields.
 
 downstate_own:
+  short: '{deaths} of our {downs} downs died; resurrects: {resurrects}.'
+  fix_short: Assign rezzers; use banners and downed heals.
   title: "Downed allies were not picked up"
   cause: >-
     {deaths} of {downs} downs ({rate}%) ended in death. Squad resurrects: {resurrects}; healing on
@@ -85,6 +115,8 @@ downstate_own:
     away from downed players.
 
 downstate_enemy:
+  short: only {enemy_deaths} of {enemy_downs} enemy downs became kills; {escaped} got back up.
+  fix_short: Cleave and stomp their downs; CC their res attempts.
   title: "Enemy downs escaped"
   cause: >-
     Only {enemy_deaths} of {enemy_downs} enemy downs ({conversion}%) were turned into kills;
@@ -95,11 +127,14 @@ downstate_enemy:
     attempts. Don't retreat immediately after downing them.
 
 downstate_enemy_good:
+  short: '{enemy_deaths} of {enemy_downs} enemy downs became kills.'
   title: "Good conversion of enemy downs"
   cause: "{enemy_deaths} of {enemy_downs} enemy downs ({conversion}%) were turned into kills."
   fix: "Keep it up."
 
 sustain_decline:
+  short: heals covered {cover_first}% of damage taken in the first half but {cover_second}% after {half_time}; downs went from {downs_first} to {downs_second}.
+  fix_short: Pace heal cooldowns; reset when sustain drops.
   title: "Sustain ran out in the second half"
   cause: >-
     Healing + barrier covered {cover_first}% of damage taken in the first half, but only
@@ -110,6 +145,8 @@ sustain_decline:
     and reapply boons) when sustain drops instead of staying in a long attrition fight.
 
 sustain_low:
+  short: heals covered only {cover_all}% of damage taken.
+  fix_short: More heal support; shorter, burstier fights.
   title: "Not enough sustain for incoming damage"
   cause: >-
     Healing + barrier covered only {cover_all}% of the damage taken. Total healing: {healing}.
@@ -119,6 +156,8 @@ sustain_low:
     engagements instead of long trades.
 
 comp_audit:
+  short: '{party_word} {parties_short} lacked {lacking}; {downs} downs in them.'
+  fix_short: Give each party a stab provider and a healer/cleanser.
   title: "Parties without support"
   cause: "{gaps}. Downs in those parties: {downs}. Party compositions: {professions}."
   fix: >-
@@ -126,11 +165,15 @@ comp_audit:
     druid) and boons (herald, chrono). Move players into parties that have a support.
 
 comp_audit_loners:
+  short: '{players_txt} in {party_word} {parties} with fewer than 3 members.'
+  fix_short: Invite them into full parties with a support.
   title: "Players in tiny parties"
   cause: "{players} players were in parties {parties}, which have fewer than 3 members and likely no support."
   fix: "Invite those players into full parties that have a support, so they get boons and heals."
 
 outnumbered:
+  short: '{enemies} enemies against our {squad}{allies_txt} ({ratio}x).'
+  fix_short: Use chokes, walls and siege against bigger groups.
   title: "Outnumbered ({ratio}x)"
   cause: >-
     The log saw {enemies} enemies against {squad} squad members and {allies} allies (ratio
@@ -140,6 +183,8 @@ outnumbered:
     Avoid open-field fights unless your boons and timing are clearly better.
 
 player_outliers:
+  short: '{count_txt} well below others of their class or played far from the tag.'
+  fix_short: Check their builds and explain their job.
   title: "Players underperforming in their role"
   cause: "{count} player(s) were well below others of the same profession: {players}."
   fix: >-

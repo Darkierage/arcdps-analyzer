@@ -227,6 +227,12 @@ export interface ImportResult {
 	notWvw?: number;
 }
 
+export interface RangeImport {
+	folder?: string;
+	since?: string;
+	until?: string;
+}
+
 export interface AppStatus {
 	version: string;
 	recording: RecordingState;
@@ -297,6 +303,12 @@ export const api = {
 		}
 		return res.json();
 	},
+	importPreview: (body: { folder?: string; since?: string; until?: string }) =>
+		request<{ new: number; alreadyKnown: number; notWvw: number; days: number; from: string | null; to: string | null }>(
+			'POST',
+			'/api/import/preview',
+			body
+		),
 	importCheck: (names: string[]) =>
 		request<{ known: Record<string, number> }>('POST', '/api/import/check', { names }),
 	cancelQueue: () => request<{ cancelled: number }>('POST', '/api/queue/cancel'),

@@ -53,7 +53,7 @@
 	});
 </script>
 
-<div class="mx-auto max-w-7xl px-6 py-6">
+<div class="page">
 	<div class="mb-5 flex flex-wrap items-end gap-4">
 		<div>
 			<h1 class="text-xl font-semibold">Fights</h1>

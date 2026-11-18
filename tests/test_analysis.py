@@ -118,3 +118,19 @@ def test_detector_can_be_disabled():
     s = Settings(detectors={"stab_gap_deaths": {"enabled": False}})
     a = analyze_ei(zerg(10, downs_at=[30, 30.5, 31, 31.5]), "x", s)
     assert all(f["detector"] != "stab_gap_deaths" for f in a.notes["issues"] + a.notes["more"])
+
+
+def test_stacking_boon_generation_has_pct_and_stacks():
+    from wvw_analyzer.metrics.columns import COLUMNS_BY_KEY
+
+    for source in ("selfBuffs", "groupBuffs", "offGroupBuffs", "squadBuffs"):
+        pct = COLUMNS_BY_KEY[f"gen_{source}_1122_pct"]
+        stacks = COLUMNS_BY_KEY[f"gen_{source}_1122"]
+        assert (pct.fmt, pct.label) == ("pct", "Stability %")
+        assert (stacks.fmt, stacks.label) == ("stacks", "Stability stacks")
+    d = zerg(4)
+    d["players"][0]["groupBuffs"] = [
+        {"id": 1122, "buffData": [{"generation": 1.5, "generationPresence": 36.0}]}]
+    m = compute_metrics(load_fight(d, "x"))
+    row = m.players[0]
+    assert row["gen_groupBuffs_1122_pct"] == 36.0 and row["gen_groupBuffs_1122"] == 1.5

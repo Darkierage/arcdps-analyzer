@@ -3,17 +3,20 @@
 from __future__ import annotations
 
 import logging
+import multiprocessing
 import queue
 import threading
 import time
 from collections.abc import Callable
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 from typing import Any
 
-from ..analysis import Skipped, analyze_file
+from ..analysis import analysis_job
 from ..config import ConfigStore
 from ..events import EventBus
 from ..store.db import Database
+from ..store.files import remove_fight_files
 from .ei_runner import EIError, EIRunner
 from .evtc import is_wvw_log
 
@@ -34,6 +37,7 @@ class Processor:
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, name="processor", daemon=True)
         self.on_done: list[Callable[[int], None]] = []
+        self.use_worker = True  # tests may analyze in-process
         self.last_done_at: float | None = None
 
     def start(self) -> None:
@@ -67,7 +71,7 @@ class Processor:
                 self._cancellable.discard(i)
                 self._cancelled.add(i)
         for i in ids:
-            self.db.delete_fight(i)
+            remove_fight_files(self.db.delete_fight(i), self.db)
         self.db.delete_empty_sessions("import")
         log.info("cancelled %d queued imports", len(ids))
         self.bus.publish({"type": "queue", "queue": self.state()})
@@ -78,6 +82,15 @@ class Processor:
         with self._lock:
             return {"pending": len(self._pending), "current": self._current,
                     "cancellable": len(self._cancellable & self._pending)}
+
+    def _analyze(self, ei_json: Path) -> dict[str, Any]:
+        """Analyze in a fresh worker process (memory is returned to the OS afterwards)."""
+        settings = self.config.settings.model_dump(mode="json")
+        if not self.use_worker:
+            return analysis_job(str(ei_json), settings)
+        ctx = multiprocessing.get_context("spawn")
+        with ProcessPoolExecutor(max_workers=1, mp_context=ctx) as pool:
+            return pool.submit(analysis_job, str(ei_json), settings).result()
 
     def runner(self) -> EIRunner:
         return EIRunner(self.config.settings.resolved_ei_path())
@@ -135,12 +148,11 @@ class Processor:
         self.db.set_status(fight_id, "analyzing")
         self._emit(fight_id)
         t0 = time.perf_counter()
-        try:
-            result = analyze_file(ei_json, self.config.settings)
-        except Skipped as s:
-            self.db.set_skipped(fight_id, s.reason, s.summary)
+        result = self._analyze(ei_json)
+        if result["kind"] == "skipped":
+            self.db.set_skipped(fight_id, result["reason"], result["summary"])
             return
-        self.db.save_analysis(fight_id, result.summary, result.stats, result.notes)
+        self.db.save_analysis(fight_id, result["summary"], result["stats"], result["notes"])
         log.info("analyzed fight %s in %.2fs", fight_id, time.perf_counter() - t0)
         self.last_done_at = time.time()
         for cb in self.on_done:

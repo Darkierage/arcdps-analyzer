@@ -60,7 +60,9 @@
 	}
 </script>
 
-<div class="card overflow-auto">
+<!-- Bounded height: the table scrolls inside the card, so the horizontal scrollbar is always on
+     screen instead of at the very bottom of a long table. Header, first column and totals stay put. -->
+<div class="card max-h-[calc(100vh-8rem)] overflow-auto overscroll-contain">
 	<table class="w-full border-separate border-spacing-0 text-sm">
 		<thead class="sticky top-0 z-10 bg-panel">
 			<tr class="text-left text-xs text-muted">
@@ -134,7 +136,7 @@
 			{/each}
 		</tbody>
 		{#if squad && mode === 'player'}
-			<tfoot>
+			<tfoot class="sticky bottom-0 z-10">
 				<tr class="font-medium">
 					<td class="sticky left-0 bg-raised px-4 py-2">Squad total</td>
 					<td class="bg-raised"></td>

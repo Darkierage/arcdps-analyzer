@@ -14,7 +14,9 @@ from .model.fight import Fight
 from .notes import ranker
 from .notes.templates import render
 
-ANALYZER_VERSION = 1
+# Bump when analysis output changes (new columns, detector fixes); stored fights with another
+# version are re-analyzed on startup.
+ANALYZER_VERSION = 2
 
 
 class Skipped(Exception):
@@ -75,3 +77,30 @@ def analyze_ei(data: dict[str, Any], log_id: str, settings: Settings) -> Analysi
 
 def analyze_file(path: Path, settings: Settings) -> Analysis:
     return analyze_ei(read_ei_json(path), path.name.split("_")[0], settings)
+
+
+def analysis_job(ei_path: str, settings_json: dict[str, Any]) -> dict[str, Any]:
+    """Entry point for the worker process: analyze one EI JSON, return plain picklable data.
+
+    Runs in a separate short-lived process so the large JSON (hundreds of MB in memory for long
+    fights) is released back to the OS as soon as the fight is done.
+    """
+    _lower_priority()
+    try:
+        a = analyze_file(Path(ei_path), Settings.model_validate(settings_json))
+    except Skipped as s:
+        return {"kind": "skipped", "reason": s.reason, "summary": s.summary}
+    return {"kind": "done", "summary": a.summary, "stats": a.stats, "notes": a.notes}
+
+
+def _lower_priority() -> None:
+    try:
+        import psutil
+
+        proc = psutil.Process()
+        if hasattr(psutil, "BELOW_NORMAL_PRIORITY_CLASS"):
+            proc.nice(psutil.BELOW_NORMAL_PRIORITY_CLASS)
+        else:
+            proc.nice(10)
+    except Exception:  # priority is best effort
+        pass

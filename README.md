@@ -56,6 +56,36 @@ fight. To change the note wording, copy `backend/wvw_analyzer/notes/templates.ya
 in won vs lost fights, plus metric medians per outcome. On the first 93 fights it was tuned with,
 `strip_balance` fired in 71% of losses vs 6% of wins, and `early_cascade` in 46% vs 6%.
 
+## LLM debrief tuning
+
+`scripts/llm_bench.py` compares prompt variants (`backend/wvw_analyzer/llm/prompts.py`) for the local
+model:
+
+- **Automatic checks:** ranking kept, fixes carried over, no invented numbers or names, no padding,
+  format.
+- **Reference comparison:** similarity to reference debriefs written by Claude (Opus 5.5).
+- **Graded reads:** Claude's grades of every output, stored in `data/llm_bench/judgments-*.yaml`.
+
+```bash
+uv run python scripts/llm_bench.py prepare            # pick 30 fights from data/dev_corpus
+uv run python scripts/llm_bench.py run --variants v8_header --temps 0.1 [--server PATH --ngl 99]
+uv run python scripts/llm_bench.py sheet <results.jsonl>   # side-by-side sheet for grading
+uv run python scripts/llm_bench.py report <results.jsonl ...>
+```
+
+Current default: `v8_header` at temperature 0.1. Code writes the result line, the framing (for
+example "Clean win, only small things to tidy up") and a one-line fact and fix per problem. The model
+only turns these into chat bullets, which removed the paraphrasing errors smaller prompts made
+("downed" turned into "died", numbers mixed up).
+
+| Prompt | Claude's grade (out of 10) |
+|---|---|
+| `v8_header` | 10.0 |
+| `v7_short` | 9.6 |
+| `v6_framed` | 8.4 |
+| `v5_anchored` | 7.3 |
+| `v1_json` (original) | lowest automatic score |
+
 ## Development (WSL / Linux)
 
 ```bash

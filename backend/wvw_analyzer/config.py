@@ -34,6 +34,9 @@ class LlmSettings(BaseModel):
     gpu_layers: int = 0
     ctx_size: int = 4096
     max_tokens: int = 450
+    # Prompt variant (llm/prompts.py), tuned with scripts/llm_bench.py against Claude references.
+    prompt: str = "v8_header"
+    temperature: float = 0.1
     idle_timeout_s: int = 300
     # Write debriefs automatically once no new log arrived for quiet_minutes.
     auto_debrief: bool = False
@@ -91,6 +94,10 @@ class ConfigStore:
     def update(self, patch: dict[str, Any]) -> Settings:
         with self._lock:
             merged = _deep_merge(self._settings.model_dump(mode="json"), patch)
+            if "detectors" in patch:
+                # The UI sends the complete set of overrides; replacing (not merging) is what
+                # lets a detector be re-enabled or reset to its defaults.
+                merged["detectors"] = patch["detectors"] or {}
             self._settings = Settings.model_validate(merged)
             self._write(self._settings)
             return self._settings

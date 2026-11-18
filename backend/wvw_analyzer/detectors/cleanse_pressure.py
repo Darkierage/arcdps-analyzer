@@ -24,6 +24,7 @@ class CleansePressure(Detector):
         "down_conditions": 4,  # a down 'under condition pressure' carries at least this many
         "min_condi_downs": 3,
         "high_condi_share": 0.35,  # or: share of damage taken that was condition damage
+        "min_downs": 3,  # ... but only in fights where the squad actually suffered downs
     }
 
     def detect(self, m: Metrics) -> list[Finding]:
@@ -44,7 +45,8 @@ class CleansePressure(Detector):
                           if e["conditions"] >= self.cfg["down_conditions"])
         pressured = conds >= self.cfg["high_conditions"] and \
             condi_downs >= self.cfg["min_condi_downs"]
-        if not pressured and share < self.cfg["high_condi_share"]:
+        if not pressured and (share < self.cfg["high_condi_share"]
+                              or s["squadDowns"] < self.cfg["min_downs"]):
             return []
         cleansers = sorted(m.players, key=lambda r: -r["cleanses"])[:3]
         return [self.finding(

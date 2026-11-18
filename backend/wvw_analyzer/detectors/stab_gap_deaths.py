@@ -48,6 +48,7 @@ class StabGapDeaths(Detector):
                 "t0": t0, "t1": t1, "downs": len(cl), "nostab": len(nostab),
                 "deaths": sum(1 for e in cl if e["died"]),
                 "parties": gap_parties or parties, "party_cov": party_cov,
+                "gap": bool(gap_parties),
                 "impact": sum(down_weight(e) for e in nostab) + 0.5 * sum(
                     down_weight(e) for e in cl if e["stab"] > 0 and e["group"] in gap_parties),
             })
@@ -61,8 +62,13 @@ class StabGapDeaths(Detector):
         parties = ", ".join(
             f"{g} ({pct(worst['party_cov'].get(g))}%)" for g in worst["parties"]
         )
+        # Either parties really lacked stab (a coverage gap), or coverage was fine but the downed
+        # players had none at that moment (stripped / ran out) - different notes.
+        key = self.name if worst["gap"] else f"{self.name}_nostab"
+        times = ", ".join(fmt_time(c["t0"]) for c in flagged)
         return [self.finding(
             severity,
+            key=key,
             impact=impact,
             window=(max(worst["t0"] - self.cfg["lookback_s"], 0.0), worst["t1"]),
             subjects=[f"Party {g}" for g in worst["parties"]],
@@ -75,5 +81,7 @@ class StabGapDeaths(Detector):
                 "deaths": worst["deaths"],
                 "bombs": len(flagged),
                 "bomb_times": ", ".join(fmt_time(c["t0"]) for c in flagged),
+                "repeat_txt": "" if len(flagged) == 1 else
+                f" It happened {len(flagged)} times ({times}).",
             },
         )]

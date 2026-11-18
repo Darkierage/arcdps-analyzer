@@ -54,4 +54,6 @@ def render(f: Finding) -> Finding:
     f.title = _format(tpl.get("title", f.detector), f.evidence)
     f.cause = _format(tpl.get("cause", ""), f.evidence)
     f.fix = _format(tpl.get("fix", ""), f.evidence)
+    f.short = _format(tpl.get("short", ""), f.evidence)
+    f.fix_short = _format(tpl.get("fix_short", ""), f.evidence)
     return f

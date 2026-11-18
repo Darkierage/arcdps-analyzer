@@ -1,6 +1,6 @@
 // Shared import flow for dropped / picked logs: check what's new, confirm big imports, upload.
 import { goto } from '$app/navigation';
-import { api } from './api.ts';
+import { api, type RangeImport } from './api.ts';
 import { logDate } from './drop.ts';
 import { toasts } from './live.svelte.ts';
 
@@ -11,7 +11,10 @@ export const SECONDS_PER_LOG = 4;
 const UPLOAD_CONCURRENCY = 4;
 
 export interface ImportPlan {
-	files: File[]; // new logs to upload
+	files: File[]; // new logs to upload (empty for a date-range import)
+	range: RangeImport | null; // set for a date-range import (the backend reads the folder)
+	count: number; // new logs that will be imported
+	notWvw: number; // non-WvW logs that will be skipped (known up front for date ranges)
 	known: number; // already imported
 	knownIds: number[];
 	from: Date | null;
@@ -53,6 +56,9 @@ class Importer {
 			const dates = fresh.map(logDate).sort((a, b) => +a - +b);
 			this.plan = {
 				files: fresh,
+				range: null,
+				count: fresh.length,
+				notWvw: 0,
 				known: files.length - fresh.length,
 				knownIds,
 				from: dates[0] ?? null,
@@ -68,9 +74,67 @@ class Importer {
 		}
 	}
 
+	/** Date-range import: preview on the backend, confirm if big, then import. */
+	async startRange(body: RangeImport) {
+		if (this.phase !== 'idle') {
+			toasts.push('An import is already in progress', 'info');
+			return;
+		}
+		this.phase = 'checking';
+		try {
+			const p = await api.importPreview(body);
+			if (!p.new) {
+				this.phase = 'idle';
+				const extra = [p.alreadyKnown && `${p.alreadyKnown} already imported`, p.notWvw && `${p.notWvw} non-WvW skipped`]
+					.filter(Boolean)
+					.join(', ');
+				toasts.push(`No new WvW logs in that range${extra ? ` (${extra})` : ''}`, 'info');
+				return;
+			}
+			const day = (d: string | null) => (d ? new Date(`${d}T12:00:00`) : null);
+			this.plan = {
+				files: [],
+				range: body,
+				count: p.new,
+				notWvw: p.notWvw,
+				known: p.alreadyKnown,
+				knownIds: [],
+				from: day(p.from),
+				to: day(p.to),
+				days: p.days,
+				minutes: Math.max(1, Math.ceil((p.new * SECONDS_PER_LOG) / 60))
+			};
+			if (p.new > CONFIRM_THRESHOLD) this.phase = 'confirm';
+			else await this.importRange();
+		} catch (e) {
+			this.phase = 'idle';
+			toasts.error(e);
+		}
+	}
+
+	private async importRange() {
+		const plan = this.plan!;
+		this.phase = 'uploading';
+		try {
+			const r = await api.importLogs(plan.range!);
+			const parts = [`queued ${r.added} log${r.added === 1 ? '' : 's'} for analysis`];
+			if (r.notWvw) parts.push(`${r.notWvw} non-WvW skipped`);
+			if (r.alreadyKnown) parts.push(`${r.alreadyKnown} already imported`);
+			const text = parts.join(' · ');
+			toasts.push(text.charAt(0).toUpperCase() + text.slice(1), 'success', 6000);
+		} catch (e) {
+			toasts.error(e);
+		} finally {
+			this.phase = 'idle';
+			this.plan = null;
+		}
+	}
+
 	/** User confirmed a big import. */
 	confirm() {
-		if (this.phase === 'confirm') this.upload();
+		if (this.phase !== 'confirm') return;
+		if (this.plan?.range) this.importRange();
+		else this.upload();
 	}
 
 	/** Dismiss the confirmation, or stop uploading the rest. */
