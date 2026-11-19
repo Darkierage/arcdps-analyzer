@@ -1,5 +1,8 @@
 # WvW ArcDPS Analyzer — Implementation Plan
 
+> **Status:** approved 2026-11-17, implemented (v0.1, phases 1-5; the Trends page from phase 6 is still open). This is the plan as approved; it is kept as history and not
+> updated. Current behavior and later decisions are in [`../DECISIONS.md`](../DECISIONS.md).
+
 ## Context
 Goal: a local desktop app that takes Guild Wars 2 arcdps WvW (zerg) logs and tells an organized group **why a fight was lost and what to change**. The output is short ranked notes with evidence, not raw stats a human still has to interpret. Alongside the diagnosis, the app shows the **standard WvW log stats** (boon uptime per group and squad, damage, down contribution, strips, cleanses...) that common log parsers show. It has a **recording mode** that automatically picks up and analyzes each log as arcdps writes it after a fight. The diagnosis is fully static (rule-based detectors). An optional local LLM only rewrites the findings into a natural-language debrief. The app must stay light while GW2 is running on the same machine.
 

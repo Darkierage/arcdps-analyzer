@@ -1,7 +1,7 @@
 # WvW Analyzer: requirements and decisions
 
 This records what the app must do and the decisions made while building it. The original
-implementation plan is in `docs/PLAN.md`. Where they differ, this file wins.
+implementation plans are in `docs/plans/`. Where they differ, this file wins.
 
 ## Goal
 

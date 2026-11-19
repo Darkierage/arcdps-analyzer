@@ -173,4 +173,5 @@ The version comes from `backend/wvw_analyzer/__init__.py`.
 - `backend/wvw_analyzer/api`: FastAPI REST and WebSocket; serves the built UI
 - `frontend/`: SvelteKit + Tailwind + ECharts
 - `scripts/`: tool setup, calibration, Windows build
-- `packaging/`: PyInstaller spec
+- `packaging/`: PyInstaller spec, Inno Setup script, icon
+- `docs/`: decisions (`DECISIONS.md`) and the approved plans (`plans/`)
