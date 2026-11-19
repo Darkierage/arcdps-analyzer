@@ -32,6 +32,33 @@ arcdps .zevtc ──► Elite Insights CLI ──► EI JSON ──► metrics �
 - **Enemy boons aren't in WvW logs.** Strip analysis therefore compares strips out vs boons lost,
   and detects squad-wide boon wipes followed by downs.
 
+## GvG mode
+
+In a **GvG**, two guilds fight agreed rounds at an agreed spot. When one commander calls a round
+off, both sides stop, walk away and rez everyone, downed enemies included, then regroup for the
+next round. Analyzed as a normal zerg fight, that looks like mistakes: "enemy downs escaped",
+"downed allies not picked up", a "skirmish" result.
+
+In GvG mode:
+- **Call-off:** a round ends at its last second of fighting. Kills up to 3 s after that still
+  count.
+- **Not counted:** downs still open at the call-off and kills after it are not held against
+  either side. The fight page shows them as "left at call-off", and the chart shades what
+  follows each call-off and draws left downs hollow.
+- **Rounds:** a lull of 25 s or more inside one log starts a new round. Each round has its own
+  opening and sustain checks.
+- **Result:** each round is won or lost on players taken out (kills plus downs left at the
+  call-off). The fight result is the round score. There are no "skirmishes" in GvG.
+- **Where to switch it:**
+  - Settings → *Fight type* sets the default for new fights.
+  - The **GvG** switch in the header changes the same setting, so it can be flipped on before a
+    GvG block and off after it.
+  - Each fight stores its own mode. **Analyze as GvG / zerg** on a fight or a session page
+    re-analyzes it.
+
+The round gap and the grace time can be changed in Settings. Both are first guesses, set without
+real GvG logs.
+
 ## Detectors
 
 | Detector | Finds |
@@ -67,7 +94,7 @@ model:
 - **Graded reads:** Claude's grades of every output, stored in `data/llm_bench/judgments-*.yaml`.
 
 ```bash
-uv run python scripts/llm_bench.py prepare            # pick 30 fights from data/dev_corpus
+uv run python scripts/llm_bench.py prepare            # pick 30 fights from data/dev_corpus (--mode gvg)
 uv run python scripts/llm_bench.py run --variants v8_header --temps 0.1 [--server PATH --ngl 99]
 uv run python scripts/llm_bench.py sheet <results.jsonl>   # side-by-side sheet for grading
 uv run python scripts/llm_bench.py report <results.jsonl ...>
@@ -99,17 +126,42 @@ uv run pytest                                  # tests (+ corpus test if data/de
 From WSL, the Windows `GuildWars2EliteInsights-CLI.exe` runs through interop. It needs the
 .NET 10 runtime on Windows. Dev data (config, DB, EI cache) lives in `./data`.
 
-## Windows build
+## Install (Windows 10/11)
 
-Requires uv and Node.js on Windows. In PowerShell, from the repo root:
+Run `WvWAnalyzer-Setup-<version>.exe`.
+
+- **No admin rights needed.** It installs for your user only, in
+  `%LOCALAPPDATA%\Programs\WvW Analyzer`, and creates a Start menu entry (a desktop shortcut is
+  optional).
+- **Nothing else to install.** The log parser (Elite Insights) and its private .NET runtime are
+  included and nothing is installed system-wide. The installer only adds Microsoft WebView2 on
+  the rare Windows install that lacks it.
+- **SmartScreen warning:** the installer isn't code-signed, so Windows says "Windows protected
+  your PC". Click **More info → Run anyway**.
+- **First launch** shows a short setup screen: the arcdps log folder (usually found
+  automatically), a parser check, and an optional download of the AI debrief model.
+- **Upgrading:** run the newer setup. It closes the running app and keeps all your data.
+- **Uninstalling** (Windows *Apps & features*) asks whether to also delete your analyzed fights
+  and settings in `%LOCALAPPDATA%\WvWAnalyzer`. The default is to keep them. Your arcdps logs are
+  never touched.
+
+## Building the app and installer
+
+Requires uv, Node.js 22.17+ (or `-SkipFrontend` with a prebuilt `frontend/build`) and Inno Setup 6
+(`winget install JRSoftware.InnoSetup`). In PowerShell, from the repo root:
 
 ```powershell
-./scripts/build_windows.ps1
+./scripts/build_windows.ps1                # -> dist\WvWAnalyzer-Setup-<version>.exe
+./scripts/build_windows.ps1 -NoInstaller   # only dist\WvWAnalyzer\ (portable folder)
 ```
 
-This produces `dist\WvWAnalyzer\WvWAnalyzer.exe`, which opens a native window (WebView2). User
-data goes to `%LOCALAPPDATA%\WvWAnalyzer`. The optional LLM is installed from Settings and runs
-on 2 CPU threads at idle priority, so it doesn't compete with the game.
+The build does the following:
+- downloads the pinned Elite Insights, .NET runtime and WebView2 bootstrapper, verifying their
+  checksums or signature;
+- builds the app with PyInstaller;
+- compiles `packaging/installer.iss`.
+
+The version comes from `backend/wvw_analyzer/__init__.py`.
 
 ## Layout
 

@@ -26,7 +26,7 @@ class StripBalance(Detector):
         if s["enemyCount"] < self.cfg["min_enemies"]:
             return []
         strips, lost = s["squadStrips"], s["squadBoonsLost"]
-        engage_min = max((s["engage"][1] - s["engage"][0]) / 60.0, 0.25)
+        engage_min = max(s["fightS"] / 60.0, 0.25)
         per_enemy_min = strips / (s["enemyCount"] * engage_min)
         top = max((r["strips"] for r in m.players), default=0)
         strippers = sorted(

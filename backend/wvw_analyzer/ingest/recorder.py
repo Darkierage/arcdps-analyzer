@@ -158,7 +158,8 @@ class Recorder:
                     continue
                 candidates.pop(key, None)
                 known.add(key)
-                fid = self.db.add_fight(key, self.session_id, st.st_mtime)
+                fid = self.db.add_fight(key, self.session_id, st.st_mtime,
+                                       self.config.settings.fight_mode)
                 if fid is not None:
                     self.fights_queued += 1
                     log.info("new log %s -> fight %s", path.name, fid)
@@ -213,7 +214,8 @@ class Recorder:
                 existing = self.db.session_by_name(name, "import")
                 sessions[day] = existing["id"] if existing else self.db.create_session(
                     name, "import")
-            fid = self.db.add_fight(str(path), sessions[day], st.st_mtime)
+            fid = self.db.add_fight(str(path), sessions[day], st.st_mtime,
+                                   self.config.settings.fight_mode)
             if fid is not None:
                 added += 1
                 fight_ids.append(fid)

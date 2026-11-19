@@ -1,7 +1,8 @@
 """Download pinned external tools into ./bin (and optionally the LLM model).
 
 Usage:
-  uv run python scripts/setup_tools.py            # Elite Insights CLI
+  uv run python scripts/setup_tools.py            # Elite Insights CLI (+ private .NET on Windows)
+  uv run python scripts/setup_tools.py --dotnet   # force the private .NET runtime (e.g. from WSL)
   uv run python scripts/setup_tools.py --llm      # + llama-server and the default model
   uv run python scripts/setup_tools.py --force    # re-download
 """
@@ -20,12 +21,16 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--force", action="store_true", help="re-download even if present")
     parser.add_argument("--llm", action="store_true", help="also fetch llama-server + model")
+    parser.add_argument("--dotnet", action="store_true",
+                        help="fetch the private .NET runtime (default on Windows)")
     parser.add_argument("--model", default=LlmSettings().model_file)
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
     d = tools.setup_ei(args.force)
     print(f"Elite Insights {tools.EI_VERSION}: {d}")
+    if args.dotnet or sys.platform == "win32":
+        print(f".NET runtime {tools.DOTNET_VERSION}: {tools.setup_dotnet(args.force)}")
     if args.llm:
         print(f"llama-server ({tools.LLAMA_BUILD}): {tools.setup_llama(args.force)}")
         last = [-1]

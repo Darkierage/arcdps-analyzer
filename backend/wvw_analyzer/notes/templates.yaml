@@ -82,7 +82,7 @@ early_cascade:
   cause: >-
     {downs} players went down within {seconds}s starting at {time} ({since_engage}s into the
     engagement), while the enemy had only {enemy_downs} down(s). {with_stab} of them had
-    stability. First downs: {players}.
+    stability. First downs: {players}.{round_note}
   fix: >-
     Engage only with the full boon setup (stab, aegis, protection, resistance) applied, and
     pre-stack on the tag before contact. If the enemy opens first, bait their bomb and hold yours
@@ -108,7 +108,18 @@ downstate_own:
   title: "Downed allies were not picked up"
   cause: >-
     {deaths} of {downs} downs ({rate}%) ended in death. Squad resurrects: {resurrects}; healing on
-    downed allies: {downed_healing}.
+    downed allies: {downed_healing}.{left_note}
+  fix: >-
+    Assign rezzing (supports and the closest players), and use downed-healing skills and banners.
+    Cleave the enemies standing near downed allies so they can rally, and avoid moving the blob
+    away from downed players.
+
+downstate_own_gvg:
+  short: '{deaths} of our {downs} downs died before the call-off.'
+  fix_short: Assign rezzers; use banners and downed heals.
+  title: "Downed allies were not picked up"
+  cause: >-
+    {deaths} of {downs} downs ({rate}%) ended in death before the round was called off.{left_note}
   fix: >-
     Assign rezzing (supports and the closest players), and use downed-healing skills and banners.
     Cleave the enemies standing near downed allies so they can rally, and avoid moving the blob
@@ -121,7 +132,7 @@ downstate_enemy:
   cause: >-
     Only {enemy_deaths} of {enemy_downs} enemy downs ({conversion}%) were turned into kills;
     {escaped} got back up. Damage to downed targets: {against_downed} ({cleave_share}% of squad
-    damage).
+    damage).{left_note}
   fix: >-
     After a bomb, push through downed enemies with cleave and stomps, and use CC to stop res
     attempts. Don't retreat immediately after downing them.
@@ -129,7 +140,7 @@ downstate_enemy:
 downstate_enemy_good:
   short: '{enemy_deaths} of {enemy_downs} enemy downs became kills.'
   title: "Good conversion of enemy downs"
-  cause: "{enemy_deaths} of {enemy_downs} enemy downs ({conversion}%) were turned into kills."
+  cause: "{enemy_deaths} of {enemy_downs} enemy downs ({conversion}%) were turned into kills.{left_note}"
   fix: "Keep it up."
 
 sustain_decline:
@@ -139,7 +150,7 @@ sustain_decline:
   cause: >-
     Healing + barrier covered {cover_first}% of damage taken in the first half, but only
     {cover_second}% after {half_time}. Downs went from {downs_first} to {downs_second}. Top
-    healers: {top_healers}.
+    healers: {top_healers}.{round_note}
   fix: >-
     Pace the healers' cooldowns: don't spend every heal in the first exchange. Reset (pull back
     and reapply boons) when sustain drops instead of staying in a long attrition fight.
@@ -150,7 +161,7 @@ sustain_low:
   title: "Not enough sustain for incoming damage"
   cause: >-
     Healing + barrier covered only {cover_all}% of the damage taken. Total healing: {healing}.
-    Top healers: {top_healers}.
+    Top healers: {top_healers}.{round_note}
   fix: >-
     Run more heal support or ask supports to switch to heal builds, and fight in shorter, burstier
     engagements instead of long trades.

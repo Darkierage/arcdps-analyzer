@@ -16,7 +16,7 @@ from .notes.templates import render
 
 # Bump when analysis output changes (new columns, detector fixes); stored fights with another
 # version are re-analyzed on startup.
-ANALYZER_VERSION = 2
+ANALYZER_VERSION = 3
 
 
 class Skipped(Exception):
@@ -53,7 +53,8 @@ def notes_for(m: Metrics, settings: Settings) -> dict[str, Any]:
     return {k: [f.model_dump(mode="json") for f in v] for k, v in ranked.items()}
 
 
-def analyze_ei(data: dict[str, Any], log_id: str, settings: Settings) -> Analysis:
+def analyze_ei(data: dict[str, Any], log_id: str, settings: Settings,
+               mode: str = "zerg") -> Analysis:
     if not is_wvw(data):
         raise Skipped("not a WvW log", {"map": data.get("fightName"),
                                         "start": data.get("timeStartStd")})
@@ -65,7 +66,7 @@ def analyze_ei(data: dict[str, Any], log_id: str, settings: Settings) -> Analysi
             "durationS": round(fight.duration_s, 1), "squadCount": len(fight.squad),
             "enemyCount": len(fight.enemies),
         })
-    m = compute_metrics(fight)
+    m = compute_metrics(fight, mode=mode, gvg=settings.gvg)
     notes = notes_for(m, settings)
     summary = dict(m.summary)
     top = notes["issues"][0] if notes["issues"] else None
@@ -75,11 +76,12 @@ def analyze_ei(data: dict[str, Any], log_id: str, settings: Settings) -> Analysi
     return Analysis(summary=summary, stats=m.stats_json(), notes=notes)
 
 
-def analyze_file(path: Path, settings: Settings) -> Analysis:
-    return analyze_ei(read_ei_json(path), path.name.split("_")[0], settings)
+def analyze_file(path: Path, settings: Settings, mode: str = "zerg") -> Analysis:
+    return analyze_ei(read_ei_json(path), path.name.split("_")[0], settings, mode)
 
 
-def analysis_job(ei_path: str, settings_json: dict[str, Any]) -> dict[str, Any]:
+def analysis_job(ei_path: str, settings_json: dict[str, Any],
+                 mode: str = "zerg") -> dict[str, Any]:
     """Entry point for the worker process: analyze one EI JSON, return plain picklable data.
 
     Runs in a separate short-lived process so the large JSON (hundreds of MB in memory for long
@@ -87,7 +89,7 @@ def analysis_job(ei_path: str, settings_json: dict[str, Any]) -> dict[str, Any]:
     """
     _lower_priority()
     try:
-        a = analyze_file(Path(ei_path), Settings.model_validate(settings_json))
+        a = analyze_file(Path(ei_path), Settings.model_validate(settings_json), mode)
     except Skipped as s:
         return {"kind": "skipped", "reason": s.reason, "summary": s.summary}
     return {"kind": "done", "summary": a.summary, "stats": a.stats, "notes": a.notes}

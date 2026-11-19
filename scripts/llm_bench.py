@@ -49,12 +49,12 @@ def claude_refs() -> dict[str, str]:
 
 
 # ---- prepare ------------------------------------------------------------------------------------
-def prepare(n: int, seed: int) -> None:
+def prepare(n: int, seed: int, mode: str = "zerg") -> None:
     corpus = sorted((paths.data_dir() / "dev_corpus").glob("*.json.gz"))
     rows = []
     for f in corpus:
         try:
-            a = analyze_file(f, Settings())
+            a = analyze_file(f, Settings(), mode)
         except Skipped:
             continue
         players = [p["name"] for p in a.stats["players"]]
@@ -284,6 +284,8 @@ def main() -> int:
     p = sub.add_parser("prepare")
     p.add_argument("--fights", type=int, default=30)
     p.add_argument("--seed", type=int, default=7)
+    p.add_argument("--mode", choices=["zerg", "gvg"], default="zerg",
+                   help="analyze the fights as zerg fights or GvG rounds")
     r = sub.add_parser("run")
     r.add_argument("--variants", default=",".join(prompts.VARIANTS))
     r.add_argument("--temps", default="0.3")
@@ -304,7 +306,7 @@ def main() -> int:
     args = ap.parse_args()
 
     if args.cmd == "prepare":
-        prepare(args.fights, args.seed)
+        prepare(args.fights, args.seed, args.mode)
     elif args.cmd == "run":
         out = run(args)
         print(report([out]))

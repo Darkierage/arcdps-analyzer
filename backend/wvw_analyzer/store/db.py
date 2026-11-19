@@ -85,7 +85,14 @@ class Database:
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.execute("PRAGMA foreign_keys=ON")
             self._conn.executescript(SCHEMA)
+            self._migrate()
             self._conn.commit()
+
+    def _migrate(self) -> None:
+        cols = {r[1] for r in self._conn.execute("PRAGMA table_info(fights)")}
+        if "mode" not in cols:
+            # Fights from before GvG mode existed were all analyzed as zerg fights.
+            self._conn.execute("ALTER TABLE fights ADD COLUMN mode TEXT NOT NULL DEFAULT 'zerg'")
 
     def _exec(self, sql: str, args: tuple = ()) -> sqlite3.Cursor:
         with self._lock:
@@ -148,14 +155,15 @@ class Database:
         return rows
 
     # ---- fights ---------------------------------------------------------------------------
-    def add_fight(self, log_path: str, session_id: int | None, mtime: float | None) -> int | None:
+    def add_fight(self, log_path: str, session_id: int | None, mtime: float | None,
+                  mode: str = "zerg") -> int | None:
         """Insert a queued fight; returns None if the log is already known."""
         with self._lock:
             try:
                 cur = self._conn.execute(
                     """INSERT INTO fights(session_id, log_path, log_name, log_mtime, status,
-                       created_at, updated_at) VALUES (?,?,?,?, 'queued', ?, ?)""",
-                    (session_id, log_path, Path(log_path).name, mtime, _now(), _now()))
+                       mode, created_at, updated_at) VALUES (?,?,?,?, 'queued', ?, ?, ?)""",
+                    (session_id, log_path, Path(log_path).name, mtime, mode, _now(), _now()))
                 self._conn.commit()
                 return int(cur.lastrowid)
             except sqlite3.IntegrityError:
@@ -197,6 +205,20 @@ class Database:
                    notes=excluded.notes, players=excluded.players""",
                 (fight_id, _pack(stats), _dumps(notes), _dumps(stats.get("players"))))
             self._conn.commit()
+
+    def set_mode(self, fight_ids: list[int], mode: str) -> None:
+        """Change the analysis mode; the old debrief no longer matches, so it is dropped."""
+        with self._lock:
+            for fid in fight_ids:
+                self._conn.execute("UPDATE fights SET mode=?, updated_at=? WHERE id=?",
+                                   (mode, _now(), fid))
+                self._conn.execute(
+                    "UPDATE analyses SET debrief=NULL, debrief_at=NULL WHERE fight_id=?", (fid,))
+            self._conn.commit()
+
+    def session_fight_ids(self, session_id: int) -> list[int]:
+        return [r["id"] for r in self._all("SELECT id FROM fights WHERE session_id=?",
+                                           (session_id,))]
 
     def save_debrief(self, fight_id: int, text: str) -> None:
         self._exec("UPDATE analyses SET debrief=?, debrief_at=? WHERE fight_id=?",

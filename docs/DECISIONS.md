@@ -111,9 +111,69 @@ also shows the standard per-player, per-party and per-squad log stats, like othe
 - Healing and barrier data only exist for players running the arcdps healing addon.
 - arcdps can't see boons applied before the log started, so the first 3 s of boon data are ignored.
 
+## Installer and first run (2026-11-18)
+
+- **Inno Setup 6, per-user** (`PrivilegesRequired=lowest`, `%LOCALAPPDATA%\Programs\WvW Analyzer`).
+  A fixed `AppId` makes a newer setup upgrade in place; program files are replaced and user data
+  is kept.
+- **Private .NET runtime.** The .NET 10 runtime (Microsoft's zip, SHA-512 verified) is bundled in
+  `bin\dotnet`. Elite Insights runs as `bin\dotnet\dotnet.exe GuildWars2EliteInsights-CLI.dll`, so
+  there is no system .NET dependency and no admin. There is no self-contained Elite Insights build
+  to use instead.
+- **Closing the app on upgrade or uninstall.** The installer force-closes processes running from
+  the program folder (the app, its workers, Elite Insights) and an app-started llama-server.
+  Nothing else is touched.
+- **Uninstall** asks whether to delete `%LOCALAPPDATA%\WvWAnalyzer`; the default is No.
+  Silent uninstall keeps the data.
+- **WebView2:** the 2 MB Evergreen bootstrapper is bundled (Authenticode-checked at build time)
+  and runs only if WebView2 is missing.
+- **Pinned checksums** for every download (Elite Insights, .NET, llama.cpp, models).
+- **App start:** a second launch opens the running instance; a port used by another program
+  moves the app to the next free port.
+- **First-run setup screen** (`/welcome`, shown while `onboarded` is false): log folder (with a
+  Browse dialog in the desktop window), parser self-test, optional LLM install. Configs from
+  before this screen count as onboarded.
+
+## GvG mode (2026-11-19)
+
+- **Why.** In a GvG, rounds end with an agreed call-off: both sides stop and rez everyone.
+  Zerg rules read the downs left at that moment as failed cleaves or allies not picked up.
+- **Mode per fight.** `fights.mode` (`zerg` | `gvg`) is stamped from `Settings.fight_mode` when
+  a fight is added. Changing the setting doesn't touch existing fights; a fight or session
+  override stores the new mode, drops the old debrief and re-analyzes. Fights from before this
+  change are `zerg`.
+- **Call-off.** A round's last second with any real fighting: damage in or out of at least 1%
+  of the fight's peak per second. After a call-off nobody deals damage, so the low-level
+  finishing of downs still belongs to the round. Kills within `calloff_grace_s` (3 s) of the
+  call-off count.
+- **Rounds.** A lull of at least `round_gap_s` (25 s) without fighting splits a log into rounds,
+  in GvG mode only: 23 of 142 normal zerg logs have 20 s+ lulls.
+- **What isn't counted:**
+  - downs still open at the call-off (left by agreement);
+  - downs and deaths after it.
+  `downstate` judges only the rest. Its GvG text leaves out the resurrect total, because the
+  log's resurrect count includes the rezzing after the call-off.
+- **Per round:**
+  - `early_cascade` and `sustain_decline` run per round and report the worst one ("in N of M
+    rounds");
+  - `out_of_position` ignores downs after a call-off;
+  - `strip_balance` uses fighting time without the regroups.
+- **Result.** Per round, players taken out (counted deaths plus downs left) with the same 1.5x
+  rule as zerg fights, but without "skirmish". The fight result is the round tally. Sessions also
+  count GvG round wins and losses.
+- **LLM.** The code-written header says "GvG round win" / "GvG win 2-1 over 3 rounds" and lists
+  what was left at the call-off. The skirmish framing isn't used. The model's input is the
+  already-corrected facts, so the prompt itself is unchanged.
+- **Validation.**
+  - With the 142 corpus logs analyzed as zerg fights, the results match the previous version
+    except one fight. Elite Insights had split one down into two intervals, so it was counted
+    twice; continued intervals are now merged.
+  - The same logs analyzed as GvG: 89 one-round logs and 4 two-round logs; 6 enemy and 1 own
+    down left at a call-off.
+  - The corpus has **no real GvG logs**: thresholds still need checking on real ones.
+
 ## Open items at the time of writing
 
-- No "Trends across sessions" page and no first-run wizard; both were in the original plan,
-  phase 6.
-- The Windows exe needs the .NET 10 runtime for Elite Insights; this is not bundled or detected yet.
-- The exe is not code-signed (SmartScreen warning).
+- No "Trends across sessions" page (original plan, phase 6).
+- The installer and exe are not code-signed (SmartScreen warning). Signing needs a paid
+  certificate or signing service.

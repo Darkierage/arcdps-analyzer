@@ -21,7 +21,8 @@ class OutOfPosition(Detector):
     }
 
     def detect(self, m: Metrics) -> list[Finding]:
-        downs = m.timeline.squad_downs
+        # Downs after a GvG call-off happen while walking away; they are not positioning.
+        downs = [e for e in m.timeline.squad_downs if e["round"] is not None]
         if not downs:
             return []
         far = [

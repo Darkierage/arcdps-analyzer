@@ -41,15 +41,16 @@
 					</td>
 					<td class="tabular px-3 py-2.5 text-right">
 						{#if s?.enemyDeaths != null}
-							<span class="text-win">{s.enemyDeaths}</span>
+							<span class="text-win">{(s.enemyDeaths ?? 0) - (s.enemyDeathsLate ?? 0)}</span>
 							<span class="text-faint">/</span>
-							<span class="text-loss">{s.squadDeaths}</span>
+							<span class="text-loss">{(s.squadDeaths ?? 0) - (s.squadDeathsLate ?? 0)}</span>
 						{:else}–{/if}
 					</td>
 					<td class="tabular px-3 py-2.5 text-right text-muted">{compact(s?.squadDamage)}</td>
 					<td class="px-3 py-2.5">
 						{#if f.status === 'done' && f.result}
 							<Badge result={f.result} />
+							{#if f.mode === 'gvg'}<span class="chip bg-accent/15 text-accent" title="Analyzed as GvG">GvG</span>{/if}
 						{:else}
 							<Badge status={f.status} />
 						{/if}

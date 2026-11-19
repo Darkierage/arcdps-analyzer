@@ -32,6 +32,7 @@ class Processor:
         self._pending: set[int] = set()
         self._cancellable: set[int] = set()  # queued imports (recording fights are never cancelled)
         self._cancelled: set[int] = set()
+        self._rerun: dict[int, bool] = {}  # changed while being processed -> run again (reparse?)
         self._lock = threading.Lock()
         self._current: int | None = None
         self._stop = threading.Event()
@@ -53,6 +54,9 @@ class Processor:
     def enqueue(self, fight_id: int, reparse: bool = False, cancellable: bool = False) -> None:
         with self._lock:
             if fight_id in self._pending:
+                # Already running with the old settings/mode: run it once more afterwards.
+                if fight_id == self._current:
+                    self._rerun[fight_id] = self._rerun.get(fight_id, False) or reparse
                 return
             self._pending.add(fight_id)
             self._cancelled.discard(fight_id)
@@ -83,14 +87,14 @@ class Processor:
             return {"pending": len(self._pending), "current": self._current,
                     "cancellable": len(self._cancellable & self._pending)}
 
-    def _analyze(self, ei_json: Path) -> dict[str, Any]:
+    def _analyze(self, ei_json: Path, mode: str = "zerg") -> dict[str, Any]:
         """Analyze in a fresh worker process (memory is returned to the OS afterwards)."""
         settings = self.config.settings.model_dump(mode="json")
         if not self.use_worker:
-            return analysis_job(str(ei_json), settings)
+            return analysis_job(str(ei_json), settings, mode)
         ctx = multiprocessing.get_context("spawn")
         with ProcessPoolExecutor(max_workers=1, mp_context=ctx) as pool:
-            return pool.submit(analysis_job, str(ei_json), settings).result()
+            return pool.submit(analysis_job, str(ei_json), settings, mode).result()
 
     def runner(self) -> EIRunner:
         return EIRunner(self.config.settings.resolved_ei_path())
@@ -121,7 +125,10 @@ class Processor:
                     self._pending.discard(fight_id)
                     self._cancellable.discard(fight_id)
                     self._current = None
+                    rerun = self._rerun.pop(fight_id, None)
                 self._emit(fight_id)
+                if rerun is not None:
+                    self.enqueue(fight_id, reparse=rerun)
 
     def _process(self, fight_id: int, reparse: bool) -> None:
         row = self.db.fight(fight_id)
@@ -148,7 +155,7 @@ class Processor:
         self.db.set_status(fight_id, "analyzing")
         self._emit(fight_id)
         t0 = time.perf_counter()
-        result = self._analyze(ei_json)
+        result = self._analyze(ei_json, row.get("mode") or "zerg")
         if result["kind"] == "skipped":
             self.db.set_skipped(fight_id, result["reason"], result["summary"])
             return

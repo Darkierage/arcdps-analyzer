@@ -30,11 +30,20 @@ def player(
     team: int = 1,
     not_in_squad: bool = False,
     boons_states: list[list[float]] | None = None,
+    active: list[tuple[float, float]] | None = None,
 ) -> dict[str, Any]:
+    """``active`` = (start_s, end_s) windows with damage dealt/taken; default the whole log."""
     n = duration_ms // POLL + 1
     pos = [[pos_inches[0] * PX, pos_inches[1] * PX]] * n
     secs = duration_ms // 1000 + 1
-    dmg = [int(i * damage_per_s) for i in range(secs)]
+    if active is None:
+        dmg = [int(i * damage_per_s) for i in range(secs)]
+    else:  # cumulative damage that only grows inside the active windows
+        dmg, total = [], 0.0
+        for i in range(secs):
+            if any(a < i <= b for a, b in active):
+                total += damage_per_s
+            dmg.append(int(total))
     downs = downs or []
     deaths = deaths or []
     return {
@@ -71,7 +80,13 @@ def player(
     }
 
 
-def enemy(i: int, *, deaths: int = 0, downs: int = 0, spec: str = "Scourge") -> dict[str, Any]:
+def enemy(i: int, *, deaths: int = 0, downs: int = 0, spec: str = "Scourge",
+          down_iv: list[list[float]] | None = None,
+          dead_iv: list[list[float]] | None = None) -> dict[str, Any]:
+    """Enemy with ``downs``/``deaths`` at fixed times, or explicit ms intervals."""
+    if down_iv is not None or dead_iv is not None:
+        down_iv, dead_iv = down_iv or [], dead_iv or []
+        downs, deaths = len(down_iv), len(dead_iv)
     return {
         "name": f"{spec} pl-{1000 + i}",
         "enemyPlayer": True,
@@ -79,8 +94,10 @@ def enemy(i: int, *, deaths: int = 0, downs: int = 0, spec: str = "Scourge") -> 
         "teamID": 2,
         "defenses": [{"deadCount": deaths, "downCount": downs}],
         "combatReplayData": {"start": 0, "end": 60_000, "positions": [[1, 1]],
-                             "down": [[10_000 + i * 100, 11_000]] * downs,
-                             "dead": [[11_000 + i * 100, 60_000]] * deaths},
+                             "down": down_iv if down_iv is not None
+                             else [[10_000 + i * 100, 11_000]] * downs,
+                             "dead": dead_iv if dead_iv is not None
+                             else [[11_000 + i * 100, 60_000]] * deaths},
     }
 
 

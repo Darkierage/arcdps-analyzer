@@ -63,6 +63,21 @@
 		}
 	}
 
+	const gvgCount = $derived(data?.fights.filter((f) => f.mode === 'gvg').length ?? 0);
+	const allGvg = $derived(!!data && data.fights.length > 0 && gvgCount === data.fights.length);
+
+	async function switchMode() {
+		const next = allGvg ? 'zerg' : 'gvg';
+		const n = data?.fights.length ?? 0;
+		if (!confirm(`Re-analyze all ${n} fights of this session as ${next === 'gvg' ? 'GvG rounds' : 'zerg fights'}?`)) return;
+		try {
+			const r = await api.setSessionMode(id, next);
+			toasts.push(`Re-analyzing ${r.queued} fights as ${next === 'gvg' ? 'GvG' : 'zerg fights'}…`);
+		} catch (e) {
+			toasts.error(e);
+		}
+	}
+
 	const agg = $derived(data?.aggregate);
 	const totals = $derived(agg?.totals ?? {});
 	const playerCols = $derived(
@@ -104,7 +119,13 @@
 					)} of fighting
 				</p>
 			</div>
-			<button class="btn btn-ghost ml-auto" onclick={remove} title="Delete session"><Icon name="trash" class="size-4" /></button>
+			<div class="ml-auto flex gap-2">
+				<button class="btn" onclick={switchMode}
+					title={allGvg ? 'Analyze every fight of this session as a zerg fight' : 'Analyze every fight of this session as GvG rounds (call-offs are not counted)'}>
+					<Icon name="swords" class="size-4" /> {allGvg ? 'Analyze session as zerg' : 'Analyze session as GvG'}
+				</button>
+				<button class="btn btn-ghost" onclick={remove} title="Delete session"><Icon name="trash" class="size-4" /></button>
+			</div>
 		</div>
 
 		<div class="mb-5 grid grid-cols-2 gap-3 md:grid-cols-4">
@@ -116,6 +137,13 @@
 					<span class="text-loss">{totals.results?.loss ?? 0}L</span>
 					<span class="text-sm font-normal text-faint">{totals.results?.skirmish ?? 0} skirmish</span>
 				</div>
+				{#if gvgCount}
+					{@const gr = totals.gvgRounds ?? {}}
+					<div class="mt-1 text-xs text-faint" title="Round results across the GvG fights of this session">
+						GvG rounds: <span class="text-win">{gr.win ?? 0}W</span> <span class="text-even">{gr.even ?? 0}E</span>
+						<span class="text-loss">{gr.loss ?? 0}L</span>
+					</div>
+				{/if}
 			</div>
 			<div class="card p-4">
 				<div class="section-title">Kills / deaths</div>

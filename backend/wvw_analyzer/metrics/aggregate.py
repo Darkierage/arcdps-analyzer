@@ -30,6 +30,7 @@ def _strip_title(title: str) -> str:
 
 def aggregate_session(items: list[dict[str, Any]]) -> dict[str, Any]:
     results: dict[str, int] = defaultdict(int)
+    gvg_rounds: dict[str, int] = defaultdict(int)  # round results across GvG fights
     totals = {"squadDeaths": 0, "enemyDeaths": 0, "squadDowns": 0, "enemyDowns": 0,
               "durationS": 0.0, "squadDamage": 0.0}
     players: dict[str, dict[str, Any]] = {}
@@ -40,16 +41,21 @@ def aggregate_session(items: list[dict[str, Any]]) -> dict[str, Any]:
     for it in items:
         s = it["summary"]
         results[s.get("result", "even")] += 1
+        for r in s.get("rounds") or [] if s.get("mode") == "gvg" else []:
+            gvg_rounds[r["result"]] += 1
         for k in totals:
             totals[k] += s.get(k) or 0
         fights.append({"id": it["id"], "map": s.get("map"), "start": s.get("start"),
                        "result": s.get("result"), "durationS": s.get("durationS"),
                        "squadDeaths": s.get("squadDeaths"), "enemyDeaths": s.get("enemyDeaths"),
                        "squadCount": s.get("squadCount"), "enemyCount": s.get("enemyCount"),
-                       "topIssue": s.get("topIssue")})
+                       "topIssue": s.get("topIssue"), "mode": s.get("mode", "zerg"),
+                       "rounds": len(s.get("rounds") or []),
+                       "roundWins": s.get("roundWins"), "roundLosses": s.get("roundLosses")})
         for bucket, target in (("issues", issues), ("more", issues), ("positives", positives)):
             for f in (it["notes"] or {}).get(bucket, []):
-                key = f.get("key") or f["detector"]
+                # GvG wording variants count as the same recurring problem.
+                key = (f.get("key") or f["detector"]).removesuffix("_gvg")
                 e = target.setdefault(key, {"key": key, "title": _strip_title(f["title"]),
                                             "count": 0, "fights": [], "losses": 0,
                                             "severity": f["severity"]})
@@ -93,6 +99,7 @@ def aggregate_session(items: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "fights": fights,
         "totals": {**totals, "fights": len(items), "results": dict(results),
+                   "gvgRounds": dict(gvg_rounds),
                    "kdr": round(totals["enemyDeaths"] / max(totals["squadDeaths"], 1), 2)},
         "players": sorted(rows, key=lambda r: -r["fights"]),
         "columns": [c.meta() for c in ALL_COLUMNS],

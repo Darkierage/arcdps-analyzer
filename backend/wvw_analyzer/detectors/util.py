@@ -49,6 +49,11 @@ def pct(x: float | None) -> int:
     return 0 if x is None else int(round(x * 100))
 
 
+def round_note(hit: int, total: int) -> str:
+    """Suffix for GvG notes about how many rounds showed the problem ("" for one round)."""
+    return f" This happened in {hit} of {total} rounds." if total > 1 else ""
+
+
 def down_weight(e: dict[str, Any]) -> float:
     """Impact weight of a down event: deaths count fully, rallied downs half."""
     return 1.0 if e.get("died") else 0.5

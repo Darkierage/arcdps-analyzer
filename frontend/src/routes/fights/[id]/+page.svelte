@@ -80,6 +80,20 @@
 		s?.result === 'loss' ? 'Why this fight was lost' : s?.result === 'win' ? 'What to improve' : 'Key issues'
 	);
 
+	// GvG: kills/deaths after the call-off and downs left at it are not part of the fight.
+	const gvg = $derived(data?.fight.mode === 'gvg');
+	const rounds = $derived(s?.mode === 'gvg' ? (s.rounds ?? []) : []);
+
+	async function switchMode() {
+		const next = gvg ? 'zerg' : 'gvg';
+		try {
+			await api.setFightMode(id, next);
+			toasts.push(next === 'gvg' ? 'Re-analyzing as a GvG fight…' : 'Re-analyzing as a zerg fight…');
+		} catch (e) {
+			toasts.error(e);
+		}
+	}
+
 	async function reanalyze(reparse = false) {
 		try {
 			await api.reanalyze(id, reparse);
@@ -123,6 +137,11 @@
 				<div class="flex items-center gap-3">
 					<h1 class="text-2xl font-semibold">{s?.map ?? f.log_name}</h1>
 					{#if f.status === 'done' && f.result}<Badge result={f.result} size="lg" />{:else}<Badge status={f.status} size="lg" />{/if}
+					{#if gvg}
+						<span class="chip bg-accent/15 text-accent" title="Analyzed as GvG: downs left at the call-off and kills after it are not counted">
+							GvG{#if rounds.length > 1}&nbsp;· {s?.roundWins ?? 0}–{s?.roundLosses ?? 0} in {rounds.length} rounds{/if}
+						</span>
+					{/if}
 				</div>
 				<div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted">
 					<span>{dateLabel(s?.start)} {timeOfDay(s?.start)}</span>
@@ -134,6 +153,10 @@
 				</div>
 			</div>
 			<div class="ml-auto flex gap-2">
+				<button class="btn" onclick={switchMode}
+					title={gvg ? 'Analyze this fight as a normal zerg fight' : 'Analyze this fight as GvG: rounds end with a call-off, downs left then are not counted'}>
+					<Icon name="swords" class="size-4" /> {gvg ? 'Analyze as zerg' : 'Analyze as GvG'}
+				</button>
 				<button class="btn" onclick={() => reanalyze(false)} title="Run detectors again (e.g. after changing thresholds)">
 					<Icon name="refresh" class="size-4" /> Re-analyze
 				</button>
@@ -168,10 +191,20 @@
 				</div>
 				<div class="card p-3.5">
 					<div class="section-title">Kills / deaths</div>
-					<div class="tabular mt-1.5 text-lg font-semibold">
-						<span class="text-win">{s.enemyDeaths}</span> <span class="text-faint">/</span> <span class="text-loss">{s.squadDeaths}</span>
-					</div>
-					<div class="text-xs text-faint">downs {s.enemyDowns} / {s.squadDowns}</div>
+					{#if s.mode === 'gvg'}
+						<div class="tabular mt-1.5 text-lg font-semibold">
+							<span class="text-win">{(s.enemyDeaths ?? 0) - (s.enemyDeathsLate ?? 0)}</span> <span class="text-faint">/</span>
+							<span class="text-loss">{(s.squadDeaths ?? 0) - (s.squadDeathsLate ?? 0)}</span>
+						</div>
+						<div class="text-xs text-faint" title="Downs still open when the round was called off (not counted)">
+							left at call-off {s.enemyDownsLeft ?? 0} / {s.squadDownsLeft ?? 0}
+						</div>
+					{:else}
+						<div class="tabular mt-1.5 text-lg font-semibold">
+							<span class="text-win">{s.enemyDeaths}</span> <span class="text-faint">/</span> <span class="text-loss">{s.squadDeaths}</span>
+						</div>
+						<div class="text-xs text-faint">downs {s.enemyDowns} / {s.squadDowns}</div>
+					{/if}
 				</div>
 				<div class="card p-3.5">
 					<div class="section-title">Damage</div>
@@ -196,6 +229,22 @@
 					<div class="text-xs text-faint">{s.hasHealData ? 'from addon users' : 'no heal addon data'}</div>
 				</div>
 			</div>
+
+			{#if rounds.length > 1}
+				<div class="mb-5 flex flex-wrap items-center gap-2 text-xs">
+					<span class="section-title mr-1">Rounds</span>
+					{#each rounds as r, i}
+						<span class="card flex items-center gap-2 px-2.5 py-1.5">
+							<span class="text-faint">#{i + 1}</span>
+							<Badge result={r.result} />
+							<span class="tabular text-muted" title="taken out: kills + enemy downs left / deaths + our downs left">
+								{r.enemyDeaths + r.enemyLeft}–{r.squadDeaths + r.squadLeft}
+							</span>
+							<span class="tabular text-faint">{duration(r.calloff - r.start)}</span>
+						</span>
+					{/each}
+				</div>
+			{/if}
 
 			<!-- Tabs -->
 			<div class="mb-4 flex gap-1 border-b border-line">

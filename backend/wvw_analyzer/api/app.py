@@ -18,7 +18,9 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .. import __version__, paths
+from ..config import FightMode
 from ..detectors import registry
+from ..ingest.recorder import iter_logs
 from ..metrics.aggregate import aggregate_session
 from ..notes import templates
 from ..state import AppState
@@ -46,6 +48,10 @@ class ImportCheck(BaseModel):
 
 class SessionPatch(BaseModel):
     name: str
+
+
+class ModeBody(BaseModel):
+    mode: FightMode
 
 
 def _day_ts(s: str | None, end: bool = False) -> float | None:
@@ -118,12 +124,32 @@ def create_app(state: AppState) -> FastAPI:
         ei = s.resolved_ei_path()
         return {
             "version": __version__,
+            "onboarded": s.onboarded,
+            "fightMode": s.fight_mode,
             "recording": state.recorder.state(),
             "queue": state.processor.state(),
             "eiInstalled": ei.exists(),
             "eiPath": str(ei),
             "llm": state.llm.status(),
             "dataDir": str(paths.data_dir()),
+        }
+
+    @app.get("/api/selftest")
+    def selftest() -> dict[str, Any]:
+        """Checks for the first-run setup screen: log folder, Elite Insights, optional LLM."""
+        s = state.config.settings
+        log_dir = s.resolved_log_dir()
+        wvw_logs = 0
+        if log_dir and log_dir.is_dir():
+            wvw_logs = sum(1 for p, _ in iter_logs(log_dir) if "wvw" in str(p.parent).lower())
+        return {
+            "onboarded": s.onboarded,
+            "logDir": {"ok": bool(log_dir and log_dir.is_dir()),
+                       "path": str(log_dir) if log_dir else None,
+                       "detected": str(paths.default_log_dir() or ""),
+                       "wvwLogs": wvw_logs},
+            "elite": state.processor.runner().self_test(),
+            "llm": state.llm.status(),
         }
 
     @app.post("/api/recording/start")
@@ -202,6 +228,12 @@ def create_app(state: AppState) -> FastAPI:
         state.db.rename_session(session_id, body.name)
         return state.db.session(session_id) or {}
 
+    @app.put("/api/sessions/{session_id}/mode")
+    def session_mode(session_id: int, body: ModeBody) -> dict[str, int]:
+        if not state.db.session(session_id):
+            raise HTTPException(404, "Session not found")
+        return {"queued": _set_mode(state.db.session_fight_ids(session_id), body.mode)}
+
     @app.delete("/api/sessions/{session_id}")
     def delete_session(session_id: int) -> dict[str, bool]:
         if state.recorder.session_id == session_id:
@@ -233,6 +265,19 @@ def create_app(state: AppState) -> FastAPI:
             raise HTTPException(404, "Fight not found")
         state.processor.enqueue(fight_id, reparse=reparse)
         return {"ok": True}
+
+    @app.put("/api/fights/{fight_id}/mode")
+    def fight_mode(fight_id: int, body: ModeBody) -> dict[str, int]:
+        if not state.db.fight(fight_id):
+            raise HTTPException(404, "Fight not found")
+        return {"queued": _set_mode([fight_id], body.mode)}
+
+    def _set_mode(ids: list[int], mode: str) -> int:
+        """Store the mode and re-analyze from the cached EI JSON (failed/skipped ones too)."""
+        state.db.set_mode(ids, mode)
+        for fid in ids:
+            state.processor.enqueue(fid)
+        return len(ids)
 
     @app.post("/api/reanalyze-all")
     def reanalyze_all() -> dict[str, int]:

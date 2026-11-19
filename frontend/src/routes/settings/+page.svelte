@@ -9,11 +9,13 @@
 	let det = $state<Record<string, any>>({});
 	let saving = $state(false);
 	let dirty = $state(false);
+	let loadedMode = 'zerg'; // fight_mode when the form was loaded (the header switch can change it too)
 
 	async function load() {
 		try {
 			data = await api.settings();
 			s = $state.snapshot(data.settings);
+			loadedMode = s.fight_mode;
 			det = Object.fromEntries(data.detectors.map((d) => [d.name, { enabled: d.enabled, ...d.config }]));
 			dirty = false;
 		} catch (e) {
@@ -34,10 +36,13 @@
 				for (const [k, v] of Object.entries(d.defaults)) if (cur[k] !== v) diff[k] = Number(cur[k]);
 				if (Object.keys(diff).length) detectors[d.name] = diff;
 			}
-			const patch = { ...s, detectors };
+			const patch: Record<string, any> = { ...s, detectors };
+			// Only send the mode if it was changed here, so a later header toggle isn't undone.
+			if (s.fight_mode === loadedMode) delete patch.fight_mode;
 			data = await api.saveSettings(patch);
 			// detectors is replaced as a whole (not merged) so removed overrides are dropped
 			s = $state.snapshot(data.settings);
+			loadedMode = s.fight_mode;
 			dirty = false;
 			await live.refresh();
 			if (reanalyze) {
@@ -74,6 +79,7 @@
 <div class="max-w-4xl">
 	<div class="sticky top-0 z-10 -mx-6 mb-5 flex items-center gap-3 bg-bg/90 px-6 py-3 backdrop-blur">
 		<h1 class="text-xl font-semibold">Settings</h1>
+		<a href="/welcome" class="text-xs text-accent hover:underline">Run setup again</a>
 		{#if dirty}<span class="chip bg-major/15 text-major">Unsaved changes</span>{/if}
 		<div class="ml-auto flex gap-2">
 			<button class="btn" disabled={saving} onclick={() => save(true)} title="Save and run all detectors again on every fight">
@@ -129,6 +135,35 @@
 				<input type="checkbox" class="accent-accent" bind:checked={s.recording.auto_record} />
 				Start/stop recording automatically with the game (Windows)
 			</label>
+		</section>
+
+		<section class="card mb-5 p-5">
+			<h2 class="mb-1 flex items-center gap-2 font-semibold"><Icon name="swords" class="size-4 text-accent" />Fight type</h2>
+			<p class="mb-4 text-sm text-muted">
+				<b class="text-text">GvG</b>: two guilds fight agreed rounds. When a round is called off, both sides stop,
+				walk away and rez everyone. In GvG mode, downs left at the call-off and kills after it are not counted
+				against anyone, each round is judged on its own and the result is the round score. The mode is stored per
+				fight when it is added, and can be changed later on a fight or session page. The <b class="text-text">GvG</b>
+				switch in the header changes the same setting.
+			</p>
+			<div class="grid grid-cols-2 gap-4 md:grid-cols-3">
+				<div>
+					<label class="label" for="fm">New fights are analyzed as</label>
+					<select id="fm" class="input" bind:value={s.fight_mode}>
+						<option value="zerg">Zerg fights</option>
+						<option value="gvg">GvG rounds</option>
+					</select>
+				</div>
+				<div>
+					<label class="label" for="g1">New round after a lull of (s)</label>
+					<input id="g1" class="input" type="number" min="5" step="1" bind:value={s.gvg.round_gap_s} />
+					<p class="mt-0.5 text-[11px] text-faint">for logs that hold several rounds</p>
+				</div>
+				<div>
+					<label class="label" for="g2">Kills still count for (s) after the call</label>
+					<input id="g2" class="input" type="number" min="0" step="1" bind:value={s.gvg.calloff_grace_s} />
+				</div>
+			</div>
 		</section>
 
 		<section class="card mb-5 p-5">

@@ -3,9 +3,11 @@
 	import favicon from '#lib/assets/favicon.svg';
 	import type { LayoutProps } from './$types';
 	import { page } from '$app/state';
+	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
 	import { live } from '#lib/live.svelte.ts';
 	import RecordButton from '#lib/components/RecordButton.svelte';
+	import ModeToggle from '#lib/components/ModeToggle.svelte';
 	import ImportDialog from '#lib/components/ImportDialog.svelte';
 	import Toasts from '#lib/components/Toasts.svelte';
 	import Icon from '#lib/components/Icon.svelte';
@@ -30,6 +32,11 @@
 
 	onMount(() => live.start());
 
+	// New users land on the setup screen until they finish it once.
+	$effect(() => {
+		if (live.onboarded === false && !page.url.pathname.startsWith('/welcome')) goto('/welcome');
+	});
+
 	const nav = [
 		{ href: '/', label: 'Fights', icon: 'swords', match: (p: string) => p === '/' || p.startsWith('/fights') },
 		{ href: '/sessions', label: 'Sessions', icon: 'calendar', match: (p: string) => p.startsWith('/sessions') },
@@ -50,7 +57,7 @@
 			</div>
 			<div>
 				<div class="text-sm font-semibold leading-tight">WvW Analyzer</div>
-				<div class="text-[11px] text-faint">zerg fight debriefs</div>
+				<div class="text-[11px] text-faint">WvW fight debriefs</div>
 			</div>
 		</div>
 		<nav class="flex flex-col gap-0.5 px-3">
@@ -84,6 +91,7 @@
 	<div class="flex min-w-0 flex-1 flex-col">
 		<header class="flex h-14 shrink-0 items-center gap-3 border-b border-line bg-panel/60 px-6 backdrop-blur">
 			<RecordButton />
+			<ModeToggle />
 			{#if importer.phase === 'checking'}
 				<div class="flex items-center gap-2 text-xs text-muted">
 					<span class="size-3 animate-spin rounded-full border-2 border-accent border-t-transparent"></span>

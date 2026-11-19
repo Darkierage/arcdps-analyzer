@@ -30,6 +30,6 @@ exe = EXE(  # noqa: F821
     exclude_binaries=True,
     name="WvWAnalyzer",
     console=False,
-    icon=None,
+    icon=str(ROOT / "packaging" / "icon.ico"),
 )
 coll = COLLECT(exe, a.binaries, a.datas, name="WvWAnalyzer")  # noqa: F821

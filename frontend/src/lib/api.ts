@@ -2,6 +2,7 @@
 
 export type Result = 'win' | 'loss' | 'even' | 'skirmish';
 export type Severity = 'critical' | 'major' | 'minor' | 'positive' | 'info';
+export type FightMode = 'zerg' | 'gvg';
 export type FightStatus = 'queued' | 'parsing' | 'analyzing' | 'done' | 'skipped' | 'failed';
 
 export interface Summary {
@@ -32,6 +33,28 @@ export interface Summary {
 	topIssue?: string | null;
 	topSeverity?: Severity | null;
 	parties?: number[];
+	mode?: FightMode;
+	fightS?: number;
+	// GvG only: rounds ending with a call-off, and what was left / happened after it.
+	rounds?: GvgRound[];
+	roundWins?: number;
+	roundLosses?: number;
+	squadDownsLeft?: number;
+	enemyDownsLeft?: number;
+	squadDownsLate?: number;
+	enemyDownsLate?: number;
+	squadDeathsLate?: number;
+	enemyDeathsLate?: number;
+}
+
+export interface GvgRound {
+	start: number;
+	calloff: number;
+	squadDeaths: number;
+	enemyDeaths: number;
+	squadLeft: number;
+	enemyLeft: number;
+	result: Result;
 }
 
 export interface FightRow {
@@ -44,6 +67,7 @@ export interface FightRow {
 	fight_start: string | null;
 	result: Result | null;
 	summary: Summary | null;
+	mode: FightMode;
 	created_at: string;
 	updated_at: string;
 }
@@ -67,6 +91,8 @@ export interface DownEvent {
 	profession: string;
 	group: number;
 	died: boolean;
+	round?: number | null;
+	left?: boolean;
 	stab: number;
 	resist: boolean;
 	boons: number;
@@ -86,6 +112,9 @@ export interface Timeline {
 	enemyDowns: number[];
 	enemyDeaths: number[];
 	engage: [number, number];
+	mode?: FightMode;
+	rounds?: { start: number; calloff: number; end: number }[];
+	enemyDownsLeft?: number[];
 }
 
 export interface Stats {
@@ -164,6 +193,10 @@ export interface SessionAggregate {
 		squadCount: number;
 		enemyCount: number;
 		topIssue: string | null;
+		mode?: FightMode;
+		rounds?: number;
+		roundWins?: number | null;
+		roundLosses?: number | null;
 	}[];
 	totals: Record<string, any>;
 	players: Row[];
@@ -233,8 +266,17 @@ export interface RangeImport {
 	until?: string;
 }
 
+export interface SelfTest {
+	onboarded: boolean;
+	logDir: { ok: boolean; path: string | null; detected: string; wvwLogs: number };
+	elite: { ok: boolean; version: string; runtime: string | null; private: boolean; error: string | null };
+	llm: LlmStatus;
+}
+
 export interface AppStatus {
 	version: string;
+	onboarded: boolean;
+	fightMode: FightMode;
 	recording: RecordingState;
 	queue: QueueState;
 	eiInstalled: boolean;
@@ -281,6 +323,7 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
 
 export const api = {
 	status: () => request<AppStatus>('GET', '/api/status'),
+	selftest: () => request<SelfTest>('GET', '/api/selftest'),
 	startRecording: (name?: string) =>
 		request<RecordingState>('POST', '/api/recording/start', { name: name || null }),
 	stopRecording: () => request<RecordingState>('POST', '/api/recording/stop'),
@@ -326,6 +369,10 @@ export const api = {
 	fight: (id: number) => request<FightDetail>('GET', `/api/fights/${id}`),
 	reanalyze: (id: number, reparse = false) =>
 		request<{ ok: boolean }>('POST', `/api/fights/${id}/reanalyze?reparse=${reparse}`),
+	setFightMode: (id: number, mode: FightMode) =>
+		request<{ queued: number }>('PUT', `/api/fights/${id}/mode`, { mode }),
+	setSessionMode: (id: number, mode: FightMode) =>
+		request<{ queued: number }>('PUT', `/api/sessions/${id}/mode`, { mode }),
 	reanalyzeAll: () => request<{ queued: number }>('POST', '/api/reanalyze-all'),
 	deleteFight: (id: number) => request<{ ok: boolean }>('DELETE', `/api/fights/${id}`),
 	debrief: (id: number) =>

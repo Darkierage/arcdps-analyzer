@@ -19,9 +19,11 @@ from ..model.fight import (
     interval_mask,
     sample_states,
 )
+from .rounds import Round, down_left, round_of, split_rounds
 
 NEAR_STACK = 2500.0  # inches from the stack center to count as "with the squad"
 REMOTE_DOWN = 5000.0  # downs farther than this from the stack belong to another fight
+GVG_ACTIVITY = 0.01  # share of peak per-second damage that still counts as fighting in GvG
 
 
 def positions_at(actor: Actor, fight: Fight, times_ms: np.ndarray) -> np.ndarray:
@@ -93,6 +95,16 @@ class Timeline:
     engage_start: float = 0.0
     engage_end: float = 0.0
     allies_near: int = 0
+    mode: str = "zerg"
+    # One round in zerg mode; GvG logs can hold several, each ending with a call-off.
+    rounds: list[Round] = field(default_factory=list)
+    # Enemy downs/deaths with GvG bookkeeping: {"t", "round", "left"} / {"t", "round"}.
+    enemy_down_events: list[dict[str, Any]] = field(default_factory=list)
+    enemy_death_events: list[dict[str, Any]] = field(default_factory=list)
+
+    @property
+    def gvg(self) -> bool:
+        return self.mode == "gvg"
 
     def series_json(self) -> dict[str, Any]:
         def clean(a: np.ndarray) -> list[float | None]:
@@ -109,6 +121,9 @@ class Timeline:
             "enemyDowns": [round(x, 2) for x in self.enemy_downs],
             "enemyDeaths": [round(x, 2) for x in self.enemy_deaths],
             "engage": [self.engage_start, self.engage_end],
+            "mode": self.mode,
+            "rounds": [r.json() for r in self.rounds],
+            "enemyDownsLeft": [round(e["t"], 2) for e in self.enemy_down_events if e["left"]],
         }
 
 
@@ -178,12 +193,13 @@ def _group_series(pts: list[PlayerTimeline]) -> dict[str, np.ndarray]:
 
 
 
-def build_timeline(fight: Fight) -> Timeline:
+def build_timeline(fight: Fight, mode: str = "zerg", round_gap_s: float = 25.0,
+                   calloff_grace_s: float = 3.0) -> Timeline:
     t = fight.time_grid()
     times_ms = t * 1000.0
     n = len(t)
     pts = [_player_timeline(p, fight, times_ms, n) for p in fight.squad]
-    tl = Timeline(t=t, players=pts)
+    tl = Timeline(t=t, players=pts, mode=mode)
     if not pts:
         return tl
 
@@ -242,6 +258,15 @@ def build_timeline(fight: Fight) -> Timeline:
 
     fighting = [p for p in pts if p.in_fight] or pts
     tl.squad = _group_series(fighting)
+    if tl.gvg:
+        # After a call-off nobody deals damage at all, so any real fighting (even the low-level
+        # finishing of downs at the end of a round) still belongs to the round. Only players at
+        # the fight count: a scout skirmishing elsewhere must not hide the call-off.
+        act = tl.squad["dmg_out"] + tl.squad["dmg_in"]
+        busy = act >= max(act.max() * GVG_ACTIVITY, 1.0)
+        tl.rounds = split_rounds(busy, t, round_gap_s, calloff_grace_s)
+    else:  # one open-ended round: nothing is ever "after the call-off"
+        tl.rounds = [Round(tl.engage_start, tl.engage_end, float(t[-1]) + 1.0)]
     for g in fight.parties:
         members = [p for p in fighting if p.player.group == g]
         if members:
@@ -280,6 +305,8 @@ def _collect_events(fight: Fight, tl: Timeline, center: np.ndarray) -> None:
                 continue  # went down somewhere else on the map, not part of this fight
             tl.squad_downs.append({
                 "t": round(ts, 2),
+                "round": round_of(ts, tl.rounds),
+                "left": tl.gvg and down_left(ts, e / 1000.0, tl.rounds),
                 "player": p.name,
                 "profession": p.profession,
                 "group": p.group,
@@ -294,11 +321,21 @@ def _collect_events(fight: Fight, tl: Timeline, center: np.ndarray) -> None:
         if pt.in_fight:
             for s, _ in p.dead_intervals:
                 tl.squad_deaths.append(
-                    {"t": round(s / 1000.0, 2), "player": p.name, "group": p.group})
+                    {"t": round(s / 1000.0, 2), "player": p.name, "group": p.group,
+                     "round": round_of(s / 1000.0, tl.rounds)})
     tl.squad_downs.sort(key=lambda e: e["t"])
     tl.squad_deaths.sort(key=lambda e: e["t"])
     for en in fight.enemies:
-        tl.enemy_downs += [s / 1000.0 for s, _ in en.down_intervals]
-        tl.enemy_deaths += [s / 1000.0 for s, _ in en.dead_intervals]
+        for s, e in en.down_intervals:
+            ts = s / 1000.0
+            tl.enemy_downs.append(ts)
+            tl.enemy_down_events.append({"t": ts, "round": round_of(ts, tl.rounds),
+                                         "left": tl.gvg and down_left(ts, e / 1000.0, tl.rounds)})
+        for s, _ in en.dead_intervals:
+            tl.enemy_deaths.append(s / 1000.0)
+            tl.enemy_death_events.append({"t": s / 1000.0,
+                                          "round": round_of(s / 1000.0, tl.rounds)})
     tl.enemy_downs.sort()
     tl.enemy_deaths.sort()
+    tl.enemy_down_events.sort(key=lambda e: e["t"])
+    tl.enemy_death_events.sort(key=lambda e: e["t"])

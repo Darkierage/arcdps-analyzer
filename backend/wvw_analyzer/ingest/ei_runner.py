@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import subprocess
 import sys
 from pathlib import Path
 
-from .. import paths
+from .. import paths, tools
 
 log = logging.getLogger(__name__)
 
@@ -28,11 +29,15 @@ def _from_windows(p: str) -> Path:
 
 
 class EIRunner:
-    def __init__(self, exe: Path, out_dir: Path | None = None, timeout_s: float = 600):
+    def __init__(self, exe: Path, out_dir: Path | None = None, timeout_s: float = 600,
+                 dotnet: Path | None | bool = True):
         self.exe = exe
         self.out_dir = out_dir or (paths.data_dir() / "ei")
         self.timeout_s = timeout_s
-        self.via_wsl = paths.is_wsl() and exe.suffix.lower() == ".exe"
+        # Private .NET runtime shipped with the app (bin/dotnet); False disables it.
+        self.dotnet = tools.dotnet_exe() if dotnet is True else (dotnet or None)
+        self.via_wsl = paths.is_wsl() and (
+            exe.suffix.lower() == ".exe" or (self.dotnet is not None))
 
     def available(self) -> bool:
         return self.exe.exists()
@@ -49,13 +54,57 @@ class EIRunner:
             conf.write_text(text, encoding="utf-8")
         return conf
 
+    def _dll(self) -> Path:
+        return self.exe.with_suffix(".dll")
+
+    def _base_cmd(self) -> list[str]:
+        """How to start Elite Insights: via the private runtime if bundled, else the exe."""
+        if self.dotnet and self._dll().exists():
+            # The dotnet muxer only uses the runtime next to it, never a system-wide .NET.
+            return [str(self.dotnet), self._arg(self._dll())]
+        if self.exe.suffix.lower() == ".dll":
+            return ["dotnet", str(self.exe)]
+        return [str(self.exe)]
+
+    def _env(self) -> dict[str, str]:
+        env = dict(os.environ)
+        if self.dotnet:
+            env["DOTNET_ROOT"] = str(self.dotnet.parent)
+            env["DOTNET_MULTILEVEL_LOOKUP"] = "0"
+            env["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1"
+        return env
+
+    def self_test(self) -> dict[str, object]:
+        """Can Elite Insights run here? Checks the files and the .NET runtime it will use."""
+        out: dict[str, object] = {"ok": False, "version": tools.EI_VERSION, "runtime": None,
+                                  "private": bool(self.dotnet), "error": None}
+        if not self.available():
+            out["error"] = "Elite Insights is not installed"
+            return out
+        cmd = [str(self.dotnet), "--list-runtimes"] if self.dotnet else ["dotnet",
+                                                                          "--list-runtimes"]
+        kwargs: dict = {"env": self._env()}
+        if sys.platform == "win32":
+            kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=30, **kwargs)
+        except (OSError, subprocess.TimeoutExpired) as e:
+            out["error"] = f".NET runtime not available ({e})"
+            return out
+        runtimes = [ln.split()[1] for ln in res.stdout.splitlines()
+                    if ln.startswith("Microsoft.NETCore.App ")]
+        ok = [v for v in runtimes if v.startswith("10.")]
+        out["runtime"] = ok[-1] if ok else (runtimes[-1] if runtimes else None)
+        out["ok"] = bool(ok)
+        if not ok:
+            out["error"] = ".NET 10 runtime not found"
+        return out
+
     def parse(self, log_file: Path) -> Path:
         if not self.available():
             raise EIError(f"Elite Insights not found at {self.exe}. Run scripts/setup_tools.py.")
-        cmd = [str(self.exe), "-c", self._arg(self._conf()), self._arg(log_file)]
-        if self.exe.suffix.lower() == ".dll":
-            cmd.insert(0, "dotnet")
-        kwargs: dict = {}
+        cmd = self._base_cmd() + ["-c", self._arg(self._conf()), self._arg(log_file)]
+        kwargs: dict = {"env": self._env()}
         if sys.platform == "win32":
             kwargs["creationflags"] = (
                 subprocess.BELOW_NORMAL_PRIORITY_CLASS | subprocess.CREATE_NO_WINDOW

@@ -6,6 +6,7 @@ import numpy as np
 
 from ..metrics.summary import Metrics
 from .base import Detector, Finding
+from .util import round_note
 
 
 class SustainDecline(Detector):
@@ -23,13 +24,24 @@ class SustainDecline(Detector):
     }
 
     def detect(self, m: Metrics) -> list[Finding]:
+        # Judged per GvG round (each has its own fresh start); a zerg fight is one round.
+        if not m.summary["hasHealData"]:
+            return []
+        rounds = m.timeline.rounds
+        hits = [f for i in range(len(rounds)) if (f := self._round(m, i)) is not None]
+        if not hits:
+            return []
+        worst = max(hits, key=lambda f: f.impact)
+        worst.evidence["round_note"] = round_note(len(hits), len(rounds))
+        return [worst]
+
+    def _round(self, m: Metrics, i: int) -> Finding | None:
         s = m.summary
         tl = m.timeline
-        if not s["hasHealData"]:
-            return []
-        e0, e1 = int(tl.engage_start), int(tl.engage_end)
+        r = tl.rounds[i]
+        e0, e1 = int(r.start), int(r.calloff)
         if e1 - e0 < self.cfg["min_engage_s"]:
-            return []
+            return None
         mid = (e0 + e1) // 2
         sustain = tl.squad["healing"] + tl.squad["barrier"]
         dmg = tl.squad["dmg_in"]
@@ -41,6 +53,8 @@ class SustainDecline(Detector):
         c1, c2, call = cover(e0, mid), cover(mid, e1 + 1), cover(e0, e1 + 1)
         downs1 = sum(1 for e in tl.squad_downs if e0 <= e["t"] < mid)
         downs2 = sum(1 for e in tl.squad_downs if mid <= e["t"] <= e1 + 1)
+        round_downs = (sum(1 for e in tl.squad_downs if e["round"] == i) if tl.gvg
+                       else s["squadDowns"])
         healers = sorted(m.players, key=lambda r: -r["healing"])[:3]
         ev = {
             "cover_first": None if c1 is None else round(100 * c1),
@@ -55,9 +69,9 @@ class SustainDecline(Detector):
         }
         if c1 and c2 is not None and (c1 - c2) / c1 >= self.cfg["drop"] and downs2 > downs1 \
                 and downs2 >= self.cfg["min_second_half_downs"]:
-            return [self.finding("major", impact=(downs2 - downs1) * 0.6, window=(mid, e1),
-                                 evidence=ev)]
-        if call is not None and call < self.cfg["low_cover"] and s["squadDowns"] >= 5:
-            return [self.finding("minor", key="sustain_low", impact=s["squadDowns"] * 0.15,
-                                 evidence=ev)]
-        return []
+            return self.finding("major", impact=(downs2 - downs1) * 0.6, window=(mid, e1),
+                                evidence=ev)
+        if call is not None and call < self.cfg["low_cover"] and round_downs >= 5:
+            return self.finding("minor", key="sustain_low", impact=round_downs * 0.15,
+                                evidence=ev)
+        return None

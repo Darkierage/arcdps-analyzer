@@ -22,28 +22,43 @@ class Downstate(Detector):
 
     def detect(self, m: Metrics) -> list[Finding]:
         s = m.summary
+        gvg = m.timeline.gvg
         out: list[Finding] = []
         res = int(sum(r["resurrects"] for r in m.players))
         downed_heal = int(sum(r["downed_healing"] for r in m.players))
-        if s["squadDowns"] >= self.cfg["min_downs"]:
-            rate = s["squadDeaths"] / s["squadDowns"]
+        # GvG: downs still open at the call-off were left by agreement, and kills after it are
+        # not part of the fight, so both are taken out before judging downstate play.
+        downs = s["squadDowns"] - s["squadDownsLeft"] - s["squadDownsLate"]
+        deaths = s["squadDeaths"] - s["squadDeathsLate"]
+        enemy_downs = s["enemyDowns"] - s["enemyDownsLeft"] - s["enemyDownsLate"]
+        enemy_deaths = s["enemyDeaths"] - s["enemyDeathsLate"]
+        if downs >= self.cfg["min_downs"]:
+            rate = deaths / downs
             if rate >= self.cfg["max_own_death_rate"]:
-                died = sum(1 for e in m.timeline.squad_downs if e["died"])
+                died = sum(1 for e in m.timeline.squad_downs
+                           if e["died"] and not e["left"] and e["round"] is not None)
+                # After a call-off both sides rez everyone, so the log's resurrect totals say
+                # nothing about the fight itself; GvG notes leave them out.
+                major = downs >= 10 and (gvg or res <= 0.2 * downs)
                 out.append(self.finding(
-                    "major" if s["squadDowns"] >= 10 and res <= 0.2 * s["squadDowns"] else "minor",
-                    key="downstate_own",
+                    "major" if major else "minor",
+                    key="downstate_own_gvg" if gvg else "downstate_own",
                     impact=died * 0.15,  # often a consequence of a lost bomb, not the cause
-                    evidence={"downs": s["squadDowns"], "deaths": s["squadDeaths"],
+                    evidence={"downs": downs, "deaths": deaths,
                               "rate": round(100 * rate), "resurrects": res,
-                              "downed_healing": downed_heal},
+                              "downed_healing": downed_heal,
+                              "left": s["squadDownsLeft"], "left_note": _left_note(
+                                  s["squadDownsLeft"], "of our downs")},
                 ))
-        if s["enemyDowns"] >= self.cfg["min_downs"]:
-            conv = s["enemyDeaths"] / s["enemyDowns"]
+        if enemy_downs >= self.cfg["min_downs"]:
+            conv = enemy_deaths / enemy_downs
             cleave = sum(r["against_downed"] for r in m.players)
-            ev = {"enemy_downs": s["enemyDowns"], "enemy_deaths": s["enemyDeaths"],
-                  "conversion": round(100 * conv), "escaped": s["enemyDowns"] - s["enemyDeaths"],
+            ev = {"enemy_downs": enemy_downs, "enemy_deaths": enemy_deaths,
+                  "conversion": round(100 * conv), "escaped": enemy_downs - enemy_deaths,
                   "against_downed": int(cleave),
-                  "cleave_share": round(100 * cleave / s["squadDamage"]) if s["squadDamage"] else 0}
+                  "cleave_share": round(100 * cleave / s["squadDamage"]) if s["squadDamage"] else 0,
+                  "left": s["enemyDownsLeft"],
+                  "left_note": _left_note(s["enemyDownsLeft"], "enemy downs")}
             if conv < self.cfg["min_enemy_conversion"]:
                 out.append(self.finding(
                     "major" if ev["escaped"] >= 5 else "minor",
@@ -55,3 +70,8 @@ class Downstate(Detector):
                 out.append(self.finding("positive", key="downstate_enemy_good", impact=1.0,
                                         evidence=ev))
         return out
+
+
+def _left_note(n: int, what: str) -> str:
+    """GvG: say what was not counted ("" in zerg fights, where nothing is left)."""
+    return f" {n} {what} left at the call-off are not counted." if n else ""

@@ -148,9 +148,31 @@ def result_line(summary: dict[str, Any]) -> str:
 
     allies = f" (+{n(s['allyCount'], 'ally').replace('allys', 'allies')})" if s.get(
         "allyCount") else ""
+    numbers = f"{s.get('squadInFight') or s.get('squadCount')}{allies} vs {s.get('enemyCount')}"
+    if s.get("mode") == "gvg":
+        return gvg_result_line(s, numbers, n)
     return (f"Result: {s.get('result')} - {n(s.get('enemyDeaths'), 'kill')} for "
-            f"{n(s.get('squadDeaths'), 'death')}, {s.get('squadInFight') or s.get('squadCount')}"
-            f"{allies} vs {s.get('enemyCount')} enemies, {_mmss(s.get('durationS'))}.")
+            f"{n(s.get('squadDeaths'), 'death')}, {numbers} enemies, "
+            f"{_mmss(s.get('durationS'))}.")
+
+
+def gvg_result_line(s: dict[str, Any], numbers: str, n: Any) -> str:
+    """GvG: round results, counted kills only, and what was left at the call-off."""
+    rounds = s.get("rounds") or []
+    kills = s.get("enemyDeaths", 0) - s.get("enemyDeathsLate", 0)
+    deaths = s.get("squadDeaths", 0) - s.get("squadDeathsLate", 0)
+    if len(rounds) > 1:
+        outcome = (f"GvG {s.get('result')} {s.get('roundWins', 0)}-{s.get('roundLosses', 0)} "
+                   f"over {len(rounds)} rounds")
+    else:
+        outcome = f"GvG round {s.get('result')}"
+    line = (f"Result: {outcome} - {n(kills, 'kill')} for {n(deaths, 'death')}, {numbers}, "
+            f"{_mmss(s.get('fightS') or s.get('durationS'))}.")
+    left_sq, left_en = s.get("squadDownsLeft", 0), s.get("enemyDownsLeft", 0)
+    if left_sq or left_en:
+        line += (f"\nLeft at the call-off (not counted): {left_en} enemy "
+                 f"down{'' if left_en == 1 else 's'}, {left_sq} of ours.")
+    return line
 
 
 V4_TEMPLATE = """Why:
@@ -337,6 +359,10 @@ def build_short(summary: dict[str, Any], notes: dict[str, Any]) -> str:
 def framing_line(summary: dict[str, Any], notes: dict[str, Any]) -> str | None:
     issues = notes.get("issues", [])[:3]
     serious = [f for f in issues if f["severity"] in ("critical", "major")]
+    if summary.get("mode") == "gvg":  # every GvG round is a deliberate fight, never "a skirmish"
+        if summary.get("result") == "win" and not serious:
+            return "Clean GvG win, only small things to tidy up:"
+        return None
     if summary.get("result") == "skirmish" and not serious:
         return "Small skirmish, nothing important - just a few small things:"
     if summary.get("result") == "win" and not serious:

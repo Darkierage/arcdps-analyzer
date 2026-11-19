@@ -1,7 +1,14 @@
-"""Download pinned external tools: Elite Insights CLI, llama-server and the LLM model."""
+"""Download pinned external tools: Elite Insights CLI, .NET runtime, llama-server, LLM model.
+
+Every download is pinned to a version and verified against a checksum. .NET and the models use
+the publisher's own checksums (Microsoft's releases.json, Hugging Face LFS metadata); Elite
+Insights and llama.cpp don't publish checksums, so theirs were recorded when the version was
+pinned.
+"""
 
 from __future__ import annotations
 
+import hashlib
 import io
 import logging
 import shutil
@@ -21,6 +28,15 @@ EI_URL = (
     "https://github.com/baaron4/GW2-Elite-Insights-Parser/releases/download/"
     f"{EI_VERSION}/GW2EICLI.zip"
 )
+EI_SHA256 = "b4314827b9eee6d81ad89913da6a0c9d46b5f52364f1de11589398ace958c07b"
+
+# Private .NET runtime for Elite Insights (bundled with the Windows app; nothing installed
+# system-wide). Hash: Microsoft's release metadata for 10.0.15.
+DOTNET_VERSION = "10.0.15"
+DOTNET_URL = (f"https://builds.dotnet.microsoft.com/dotnet/Runtime/{DOTNET_VERSION}/"
+              f"dotnet-runtime-{DOTNET_VERSION}-win-x64.zip")
+DOTNET_SHA512 = ("06f0bedd59ae4ac722ada805a6d6bbf605bcdc790c71f59b7003878072902b5cde5dec8c40c0baa8"
+                 "1192660d4748e9d79afdbdcb0c0ea9d6b821d0a044c4c6dd")
 
 LLAMA_BUILD = "b12100"
 LLAMA_ASSET = {
@@ -28,18 +44,35 @@ LLAMA_ASSET = {
     "linux": f"llama-{LLAMA_BUILD}-bin-ubuntu-x64.tar.gz",
 }
 LLAMA_URL = "https://github.com/ggml-org/llama.cpp/releases/download/{build}/{asset}"
+LLAMA_SHA256 = {
+    "win32": "2578e983b1405b6368e374b64926212229f436c40e19fcffa383e81bab73efd8",
+    "linux": "2612b96a683840bf16e3e98a82b0bcc741edde1266870c02002815606714cb13",
+}
 
 MODELS = {
     "Qwen3-4B-Q4_K_M.gguf": "https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/main/Qwen3-4B-Q4_K_M.gguf",
     "Qwen3-1.7B-Q8_0.gguf": "https://huggingface.co/Qwen/Qwen3-1.7B-GGUF/resolve/main/Qwen3-1.7B-Q8_0.gguf",
 }
 
+# Hugging Face LFS sha256 of each model file.
+MODEL_SHA256 = {
+    "Qwen3-4B-Q4_K_M.gguf": "7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5",
+    "Qwen3-1.7B-Q8_0.gguf": "061b54daade076b5d3362dac252678d17da8c68f07560be70818cace6590cb1a",
+}
+
 Progress = Callable[[int, int], None]  # (downloaded bytes, total bytes)
+
+
+class ChecksumError(RuntimeError):
+    pass
 UA = {"User-Agent": "wvw-analyzer-setup"}
 
 
-def _download(url: str, dest: Path | None = None, progress: Progress | None = None) -> bytes:
-    """Download to memory (dest None) or stream to a file."""
+def _download(url: str, dest: Path | None = None, progress: Progress | None = None,
+              sha256: str | None = None, sha512: str | None = None) -> bytes:
+    """Download to memory (dest None) or stream to a file, verifying the checksum."""
+    digest = hashlib.sha512() if sha512 else hashlib.sha256()
+    expected = (sha512 or sha256 or "").lower()
     req = urllib.request.Request(url, headers=UA)
     with urllib.request.urlopen(req, timeout=120) as resp:
         total = int(resp.headers.get("Content-Length") or 0)
@@ -53,12 +86,17 @@ def _download(url: str, dest: Path | None = None, progress: Progress | None = No
         try:
             while chunk := resp.read(1 << 20):
                 sink.write(chunk)
+                digest.update(chunk)
                 done += len(chunk)
                 if progress:
                     progress(done, total)
         finally:
             if dest is not None:
                 sink.close()
+        if expected and digest.hexdigest() != expected:
+            if dest is not None:
+                dest.with_suffix(dest.suffix + ".part").unlink(missing_ok=True)
+            raise ChecksumError(f"Checksum mismatch for {url} - download corrupted or tampered")
         if dest is not None:
             dest.with_suffix(dest.suffix + ".part").replace(dest)
             return b""
@@ -104,11 +142,39 @@ def setup_ei(force: bool = False) -> Path:
         shutil.rmtree(d)
     d.mkdir(parents=True)
     log.info("downloading %s", EI_URL)
-    _extract(_download(EI_URL), "ei.zip", d)
+    _extract(_download(EI_URL, sha256=EI_SHA256), "ei.zip", d)
     if not (d / "GuildWars2EliteInsights-CLI.exe").exists():
         raise RuntimeError("GuildWars2EliteInsights-CLI.exe not found in the downloaded archive")
     _mark_exec(d, ("*.exe",))  # needed to launch the Windows exe from WSL
     version_file.write_text(EI_VERSION)
+    return d
+
+
+# ---- private .NET runtime ----------------------------------------------------------------------
+def dotnet_dir() -> Path:
+    return paths.bin_dir() / "dotnet"
+
+
+def dotnet_exe() -> Path | None:
+    exe = dotnet_dir() / "dotnet.exe"
+    return exe if exe.exists() else None
+
+
+def setup_dotnet(force: bool = False) -> Path:
+    """Unpack the pinned Windows .NET runtime into bin/dotnet (used only by Elite Insights)."""
+    d = dotnet_dir()
+    version_file = d / ".version"
+    if not force and version_file.exists() and version_file.read_text().strip() == DOTNET_VERSION:
+        return d
+    if d.exists():
+        shutil.rmtree(d)
+    d.mkdir(parents=True)
+    log.info("downloading %s", DOTNET_URL)
+    _extract(_download(DOTNET_URL, sha512=DOTNET_SHA512), "dotnet.zip", d)
+    if not (d / "dotnet.exe").exists():
+        raise RuntimeError("dotnet.exe not found in the downloaded runtime")
+    _mark_exec(d, ("*.exe",))
+    version_file.write_text(DOTNET_VERSION)
     return d
 
 
@@ -138,7 +204,7 @@ def setup_llama(force: bool = False) -> Path:
     d.mkdir(parents=True)
     url = LLAMA_URL.format(build=LLAMA_BUILD, asset=asset)
     log.info("downloading %s", url)
-    _extract(_download(url), asset, d)
+    _extract(_download(url, sha256=LLAMA_SHA256[plat]), asset, d)
     _mark_exec(d, ("llama-*",))
     version_file.write_text(LLAMA_BUILD)
     server = llama_server_path()
@@ -158,5 +224,5 @@ def download_model(name: str, progress: Progress | None = None) -> Path:
     if dest.exists():
         return dest
     log.info("downloading model %s", name)
-    _download(MODELS[name], dest, progress)
+    _download(MODELS[name], dest, progress, sha256=MODEL_SHA256.get(name))
     return dest

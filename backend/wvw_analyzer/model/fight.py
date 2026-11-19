@@ -53,6 +53,21 @@ def interval_mask(intervals: list[list[float]] | None, times_ms: np.ndarray) -> 
     return mask
 
 
+def _merge_continued(intervals: list[list[float]]) -> list[list[float]]:
+    """Join intervals that continue each other.
+
+    EI splits a state still open at the end of the log into a second interval starting exactly
+    there (a corpse lying until the log ends shows up as two deaths otherwise).
+    """
+    out: list[list[float]] = []
+    for s, e in intervals:
+        if out and s <= out[-1][1]:
+            out[-1] = [out[-1][0], max(out[-1][1], e)]
+        else:
+            out.append([s, e])
+    return out
+
+
 @dataclass
 class Actor:
     name: str
@@ -66,11 +81,11 @@ class Actor:
 
     @property
     def down_intervals(self) -> list[list[float]]:
-        return self.replay.get("down") or []
+        return _merge_continued(self.replay.get("down") or [])
 
     @property
     def dead_intervals(self) -> list[list[float]]:
-        return self.replay.get("dead") or []
+        return _merge_continued(self.replay.get("dead") or [])
 
     @property
     def dc_intervals(self) -> list[list[float]]:

@@ -6,6 +6,7 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from ..config import GvgSettings
 from ..model.fight import Fight
 from .columns import ALL_COLUMNS
 from .table import Row, party_rows, player_rows, squad_row
@@ -24,6 +25,49 @@ def classify_result(squad_deaths: int, enemy_deaths: int) -> Result:
     if ratio <= 1 / 1.5:
         return "loss"
     return "even"
+
+
+def classify_round(squad_out: int, enemy_out: int) -> Result:
+    """GvG round result from players taken out (counted deaths + downs left at the call-off).
+
+    There is no "skirmish" in GvG: every round is a deliberate fight.
+    """
+    ratio = (enemy_out + 1) / (squad_out + 1)
+    if ratio >= 1.5:
+        return "win"
+    if ratio <= 1 / 1.5:
+        return "loss"
+    return "even"
+
+
+def gvg_summary(tl: Timeline) -> dict[str, Any]:
+    """Per-round bookkeeping for GvG: what was left at each call-off and who won the round."""
+    rounds = []
+    for i, r in enumerate(tl.rounds):
+        sq_deaths = sum(1 for e in tl.squad_deaths if e["round"] == i)
+        en_deaths = sum(1 for e in tl.enemy_death_events if e["round"] == i)
+        sq_left = sum(1 for e in tl.squad_downs if e["round"] == i and e["left"])
+        en_left = sum(1 for e in tl.enemy_down_events if e["round"] == i and e["left"])
+        rounds.append({
+            "start": r.start, "calloff": r.calloff,
+            "squadDeaths": sq_deaths, "enemyDeaths": en_deaths,
+            "squadLeft": sq_left, "enemyLeft": en_left,
+            "result": classify_round(sq_deaths + sq_left, en_deaths + en_left),
+        })
+    wins = sum(1 for r in rounds if r["result"] == "win")
+    losses = sum(1 for r in rounds if r["result"] == "loss")
+    return {
+        "rounds": rounds,
+        "roundWins": wins,
+        "roundLosses": losses,
+        "squadDownsLeft": sum(1 for e in tl.squad_downs if e["left"]),
+        "enemyDownsLeft": sum(1 for e in tl.enemy_down_events if e["left"]),
+        "squadDownsLate": sum(1 for e in tl.squad_downs if e["round"] is None),
+        "enemyDownsLate": sum(1 for e in tl.enemy_down_events if e["round"] is None),
+        "squadDeathsLate": sum(1 for e in tl.squad_deaths if e["round"] is None),
+        "enemyDeathsLate": sum(1 for e in tl.enemy_death_events if e["round"] is None),
+        "result": "win" if wins > losses else "loss" if losses > wins else "even",
+    }
 
 
 @dataclass
@@ -104,24 +148,35 @@ def build_summary(fight: Fight, players: list[Row], tl: Timeline) -> dict[str, A
         "eiVersion": fight.ei_version,
         "result": classify_result(squad_deaths, enemy_deaths),
         "engage": [tl.engage_start, tl.engage_end],
+        # Time actually spent fighting (GvG: without the regroups between rounds).
+        "fightS": round(sum(r.calloff - r.start for r in tl.rounds), 1)
+        if tl.gvg else tl.engage_end - tl.engage_start,
         "parties": fight.parties,
+        "mode": tl.mode,
+        # Zerg values; GvG overrides them below. Detectors subtract these from the totals.
+        "squadDownsLeft": 0, "enemyDownsLeft": 0, "squadDownsLate": 0, "enemyDownsLate": 0,
+        "squadDeathsLate": 0, "enemyDeathsLate": 0,
     }
 
 
-def compute_metrics(fight: Fight) -> Metrics:
+def compute_metrics(fight: Fight, mode: str = "zerg", gvg: GvgSettings | None = None) -> Metrics:
+    gvg = gvg or GvgSettings()
     players = player_rows(fight)
-    tl = build_timeline(fight)
+    tl = build_timeline(fight, mode, gvg.round_gap_s, gvg.calloff_grace_s)
     for row, pt in zip(players, tl.players, strict=True):
         row["in_fight"] = pt.in_fight
         row["near_share"] = round(pt.near_share, 2)
         row["fight_dist_tag"] = None if pt.fight_dist_tag is None else round(pt.fight_dist_tag)
         row["fight_dist_stack"] = (
             None if pt.fight_dist_stack is None else round(pt.fight_dist_stack))
+    summary = build_summary(fight, players, tl)
+    if tl.gvg:
+        summary.update(gvg_summary(tl))
     return Metrics(
         fight=fight,
         players=players,
         parties=party_rows(players),
         squad=squad_row(players),
         timeline=tl,
-        summary=build_summary(fight, players, tl),
+        summary=summary,
     )

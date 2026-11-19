@@ -66,6 +66,18 @@
 		const t = tl.t;
 		const sq = tl.squad;
 		const lane = (color: string) => ({ itemStyle: { color }, symbolSize: 9, yAxisIndex: 2, xAxisIndex: 2 });
+		// GvG: shade what follows each call-off (regroup / rezzing; not part of the fight).
+		const tEnd = t[t.length - 1] ?? 0;
+		const rounds = tl.mode === 'gvg' ? (tl.rounds ?? []) : [];
+		const afterCall = rounds
+			.map((r, i) => [r.calloff, rounds[i + 1]?.start ?? tEnd])
+			.filter(([a, b]) => b - a >= 1)
+			.map(([a, b], i) => [
+				{ xAxis: a, name: rounds.length > 1 ? `Round ${i + 1} called` : 'Called off' },
+				{ xAxis: b }
+			]);
+		const enemyLeft = new Set(tl.enemyDownsLeft ?? []);
+		const hollow = (color: string) => ({ color: 'transparent', borderColor: color, borderWidth: 1.5 });
 		const series: any[] = [
 			{
 				name: 'Stability',
@@ -115,7 +127,15 @@
 				yAxisIndex: 3,
 				data: (sq.dmg_out ?? []).map((v, i) => [t[i], v]),
 				itemStyle: { color: C.out },
-				barCategoryGap: '10%'
+				barCategoryGap: '10%',
+				markArea: afterCall.length
+					? {
+							silent: true,
+							itemStyle: { color: 'rgba(138,147,168,0.10)' },
+							label: { color: C.text, fontSize: 10, position: 'insideTopLeft' },
+							data: afterCall
+						}
+					: undefined
 			},
 			{
 				name: 'Damage in',
@@ -141,9 +161,31 @@
 				type: 'scatter',
 				...lane(C.down),
 				symbol: 'triangle',
-				data: tl.squadDowns.map((d) => ({ value: [d.t, 1], d })),
+				data: tl.squadDowns.filter((d) => !d.left).map((d) => ({ value: [d.t, 1], d })),
 				symbolSize: 9
 			},
+			...(rounds.length
+				? [
+						{
+							name: 'Left at call-off',
+							type: 'scatter',
+							...lane(C.down),
+							symbol: 'triangle',
+							itemStyle: hollow(C.down),
+							data: tl.squadDowns.filter((d) => d.left).map((d) => ({ value: [d.t, 1], d })),
+							symbolSize: 9
+						},
+						{
+							name: 'Enemy left at call-off',
+							type: 'scatter',
+							...lane('#a7f3d0'),
+							symbol: 'triangle',
+							itemStyle: hollow('#a7f3d0'),
+							data: tl.enemyDowns.filter((x) => enemyLeft.has(Math.round(x * 100) / 100)).map((x) => [x, 0]),
+							symbolSize: 8
+						}
+					]
+				: []),
 			{
 				name: 'Squad death',
 				type: 'scatter',
@@ -158,7 +200,7 @@
 				type: 'scatter',
 				...lane('#a7f3d0'),
 				symbol: 'triangle',
-				data: tl.enemyDowns.map((x) => [x, 0]),
+				data: tl.enemyDowns.filter((x) => !enemyLeft.has(Math.round(x * 100) / 100)).map((x) => [x, 0]),
 				symbolSize: 8
 			},
 			{

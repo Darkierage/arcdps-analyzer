@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import threading
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, Field
@@ -26,6 +26,16 @@ class RecordingSettings(BaseModel):
     auto_record: bool = False  # start/stop with the Gw2-64.exe process (Windows only)
 
 
+FightMode = Literal["zerg", "gvg"]
+
+
+class GvgSettings(BaseModel):
+    """GvG rounds end with an agreed call-off; these tune how rounds and call-offs are found."""
+
+    round_gap_s: float = 25  # a damage lull this long inside a log starts a new round
+    calloff_grace_s: float = 3  # kills this soon after the last damage still count
+
+
 class LlmSettings(BaseModel):
     enabled: bool = False
     server_path: str | None = None  # llama-server executable; default: bin/llama/llama-server(.exe)
@@ -44,6 +54,7 @@ class LlmSettings(BaseModel):
 
 
 class Settings(BaseModel):
+    onboarded: bool = False  # first-run setup screen completed
     log_dir: str | None = None
     ei_path: str | None = None
     host: str = "127.0.0.1"
@@ -51,6 +62,9 @@ class Settings(BaseModel):
     filters: FilterSettings = Field(default_factory=FilterSettings)
     recording: RecordingSettings = Field(default_factory=RecordingSettings)
     llm: LlmSettings = Field(default_factory=LlmSettings)
+    # Mode for newly added fights; each fight stores its own mode (it can be changed per fight).
+    fight_mode: FightMode = "zerg"
+    gvg: GvgSettings = Field(default_factory=GvgSettings)
     # Per-detector overrides, e.g. {"stab_gap_deaths": {"enabled": true, "min_downs": 3}}
     detectors: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
@@ -74,6 +88,8 @@ class ConfigStore:
     def _load(self) -> Settings:
         if self.path.exists():
             raw = yaml.safe_load(self.path.read_text(encoding="utf-8")) or {}
+            # Installs from before the setup screen existed are already set up.
+            raw.setdefault("onboarded", True)
             return Settings.model_validate(raw)
         settings = Settings()
         if settings.log_dir is None and (d := paths.default_log_dir()):
