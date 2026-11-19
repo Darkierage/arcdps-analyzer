@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tick } from 'svelte';
 	import type { Column, Row } from '#lib/api.ts';
 	import { fmtValue, profColor } from '#lib/format.ts';
 
@@ -10,7 +11,8 @@
 		mode = 'player',
 		hideAbsent = true,
 		extraLead = null,
-		rowHref = null
+		rowHref = null,
+		focus = null
 	}: {
 		columns: Column[];
 		players: Row[];
@@ -20,7 +22,12 @@
 		hideAbsent?: boolean;
 		extraLead?: { key: string; label: string } | null;
 		rowHref?: ((r: Row) => string) | null;
+		/** Column to sort by and tint (deep link from a finding's "See stats"). */
+		focus?: { column: string; sort?: 'asc' | 'desc' } | null;
 	} = $props();
+
+	let scroller = $state<HTMLDivElement | null>(null);
+	const focusKey = $derived(focus && columns.some((c) => c.key === focus.column) ? focus.column : null);
 
 	let sortKey = $state<string | null>(null);
 	let sortDir = $state<1 | -1>(-1);
@@ -45,6 +52,18 @@
 		Object.fromEntries(columns.map((c) => [c.key, Math.max(0, ...baseRows.map((r) => Number(r[c.key]) || 0))]))
 	);
 
+	// A new focus sorts by its column and scrolls it into view; the user can re-sort afterwards.
+	$effect(() => {
+		if (!focus || !focusKey) return;
+		sortKey = focusKey;
+		sortDir = focus.sort === 'asc' ? 1 : -1;
+		// Scroll only the table (not the page) so the column is in view.
+		tick().then(() => {
+			const th = scroller?.querySelector<HTMLElement>(`[data-col="${focusKey}"]`);
+			if (scroller && th) scroller.scrollLeft = Math.max(0, th.offsetLeft - scroller.clientWidth / 2 + th.offsetWidth / 2);
+		});
+	});
+
 	function sortBy(k: string) {
 		if (sortKey === k) sortDir = sortDir === 1 ? -1 : 1;
 		else {
@@ -62,7 +81,7 @@
 
 <!-- Bounded height: the table scrolls inside the card, so the horizontal scrollbar is always on
      screen instead of at the very bottom of a long table. Header, first column and totals stay put. -->
-<div class="card max-h-[calc(100vh-8rem)] overflow-auto overscroll-contain">
+<div bind:this={scroller} class="card max-h-[calc(100vh-8rem)] overflow-auto overscroll-contain">
 	<table class="w-full border-separate border-spacing-0 text-sm">
 		<thead class="sticky top-0 z-10 bg-panel">
 			<tr class="text-left text-xs text-muted">
@@ -80,7 +99,7 @@
 					</th>
 				{/if}
 				{#each columns as c (c.key)}
-					<th class="border-b border-line px-3 py-2.5 text-right font-medium whitespace-nowrap" title={c.description}>
+					<th data-col={c.key} class="border-b border-line px-3 py-2.5 text-right font-medium whitespace-nowrap {focusKey === c.key ? 'bg-accent/12 text-text' : ''}" title={c.description}>
 						<button onclick={() => sortBy(c.key)} class="hover:text-text {sortKey === c.key ? 'text-accent' : ''}">
 							{c.label}{#if sortKey === c.key}<span class="ml-0.5">{sortDir === -1 ? '↓' : '↑'}</span>{/if}
 						</button>
@@ -122,7 +141,7 @@
 					{#each columns as c (c.key)}
 						{@const v = r[c.key]}
 						{@const w = barWidth(c, v)}
-						<td class="tabular relative border-b border-line/50 px-3 py-2 text-right whitespace-nowrap">
+						<td class="tabular relative border-b border-line/50 px-3 py-2 text-right whitespace-nowrap {focusKey === c.key ? 'bg-accent/6' : ''}">
 							{#if w > 0}
 								<span
 									class="absolute inset-y-1.5 right-1 rounded-sm {c.higherIsBetter ? 'bg-accent/12' : 'bg-loss/12'}"

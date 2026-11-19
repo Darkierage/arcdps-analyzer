@@ -10,6 +10,7 @@ from .util import pct, window_mean
 class CompAudit(Detector):
     name = "comp_audit"
     label = "Party composition gaps"
+    focus = {"comp_audit_loners": {"tab": "positioning", "column": "stack_dist"}}
     description = (
         "Flags parties whose members had almost no stability, cleanses or healing - usually a "
         "party without its support - and players left in tiny parties."

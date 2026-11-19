@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { goto } from '$app/navigation';
-	import { onMount } from 'svelte';
-	import { api, type Column, type FightDetail } from '#lib/api.ts';
+	import { goto, replaceState } from '$app/navigation';
+	import { onMount, tick, untrack } from 'svelte';
+	import { api, type Column, type FightDetail, type FindingFocus } from '#lib/api.ts';
 	import { live, toasts } from '#lib/live.svelte.ts';
 	import { compact, dateLabel, duration, fmtValue, profColor, timeOfDay } from '#lib/format.ts';
 	import Badge from '#lib/components/Badges.svelte';
@@ -22,10 +22,22 @@
 	let boonGroup = $state('Uptime');
 	let showMore = $state(false);
 	let debriefBusy = $state(false);
+	// Deep links: ?tab=<tab>, ?finding=<key> (from a session strength/problem), ?stat=<column>.
+	let focusFinding = $state<string | null>(null);
+	let focusStat = $state<FindingFocus | null>(null);
+	let fromSession = $state(false);
+	let pendingFinding: string | null = null;
 
 	async function load() {
 		try {
 			data = await api.fight(id);
+			const g = focusStat?.tab === 'boons' && data.stats?.columns.find((c: Column) => c.key === focusStat?.column)?.group;
+			if (g) boonGroup = g;
+			if (pendingFinding) {
+				const key = pendingFinding;
+				pendingFinding = null;
+				showFinding(key);
+			}
 		} catch (e) {
 			toasts.error(e);
 		} finally {
@@ -48,8 +60,55 @@
 		void id;
 		loading = true;
 		highlight = null;
+		untrack(() => {
+			const q = page.url.searchParams;
+			const t = q.get('tab');
+			const stat = q.get('stat');
+			pendingFinding = q.get('finding');
+			fromSession = q.get('from') === 'session';
+			focusFinding = null;
+			showMore = false;
+			tab = pendingFinding ? 'debrief' : tabs.some((x) => x.id === t) ? t! : 'debrief';
+			focusStat = stat && tab !== 'debrief' ? { tab, column: stat, sort: q.get('sort') === 'asc' ? 'asc' : 'desc' } : null;
+		});
 		load();
 	});
+
+	/** Open the debrief at one finding: expand "more" if needed, highlight and scroll to it. */
+	async function showFinding(key: string) {
+		const n = data?.notes;
+		const f = n && [...n.issues, ...n.more, ...n.positives].find((x) => x.key === key);
+		if (!n || !f) {
+			if (n) toasts.push('That note is no longer part of this fight\'s analysis.');
+			return;
+		}
+		if (n.more.some((x) => x.key === key)) showMore = true;
+		focusFinding = key;
+		if (f.window) highlight = f.window;
+		await tick();
+		document.getElementById(`finding-${key}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+	}
+
+	/** Switch tab (optionally focused on one stat column) and keep the URL in sync. */
+	function setTab(t: string, focus: FindingFocus | null = null) {
+		tab = t;
+		focusStat = focus;
+		if (focus && t === 'boons') {
+			const g = stats?.columns.find((c: Column) => c.key === focus.column)?.group;
+			if (g) boonGroup = g;
+		}
+		const u = new URL(page.url.href);
+		for (const k of ['tab', 'stat', 'sort', 'finding']) u.searchParams.delete(k);
+		if (t !== 'debrief') u.searchParams.set('tab', t);
+		if (focus) {
+			u.searchParams.set('stat', focus.column);
+			if (focus.sort === 'asc') u.searchParams.set('sort', 'asc');
+		}
+		replaceState(u, page.state);
+		if (focus) window.scrollTo({ top: 0, behavior: 'smooth' });
+	}
+
+	const backHref = $derived(fromSession && data?.fight.session_id ? `/sessions/${data.fight.session_id}` : '/');
 
 	const s = $derived(data?.fight.summary ?? data?.stats?.summary ?? null);
 	const stats = $derived(data?.stats ?? null);
@@ -123,8 +182,8 @@
 </script>
 
 <div class="page">
-	<a href="/" class="mb-4 inline-flex items-center gap-1.5 text-sm text-muted hover:text-text">
-		<Icon name="back" class="size-4" /> Fights
+	<a href={backHref} class="mb-4 inline-flex items-center gap-1.5 text-sm text-muted hover:text-text">
+		<Icon name="back" class="size-4" /> {backHref === '/' ? 'Fights' : 'Session'}
 	</a>
 
 	{#if loading && !data}
@@ -253,7 +312,7 @@
 						class="-mb-px border-b-2 px-3.5 py-2 text-sm transition {tab === t.id
 							? 'border-accent font-medium text-text'
 							: 'border-transparent text-muted hover:text-text'}"
-						onclick={() => (tab = t.id)}
+						onclick={() => setTab(t.id)}
 					>
 						{t.label}
 					</button>
@@ -281,8 +340,9 @@
 							<FindingCard
 								finding={fnd}
 								rank={i + 1}
-								active={highlight != null && fnd.window != null && highlight[0] === fnd.window[0] && highlight[1] === fnd.window[1]}
-								onfocus={(w) => (highlight = w)}
+								active={focusFinding === fnd.key || (highlight != null && fnd.window != null && highlight[0] === fnd.window[0] && highlight[1] === fnd.window[1])}
+								onfocus={(w) => ((highlight = w), (focusFinding = null))}
+								onstats={(f) => setTab(f.tab, f)}
 							/>
 						{/each}
 						{#if notes.more.length}
@@ -291,7 +351,8 @@
 							</button>
 							{#if showMore}
 								{#each notes.more as fnd}
-									<FindingCard finding={fnd} onfocus={(w) => (highlight = w)} />
+									<FindingCard finding={fnd} active={focusFinding === fnd.key} onfocus={(w) => ((highlight = w), (focusFinding = null))}
+										onstats={(f) => setTab(f.tab, f)} />
 								{/each}
 							{/if}
 						{/if}
@@ -301,7 +362,7 @@
 						{#if notes.positives.length}
 							<h2 class="text-base font-semibold">What went well</h2>
 							{#each notes.positives as fnd}
-								<FindingCard finding={fnd} />
+								<FindingCard finding={fnd} active={focusFinding === fnd.key} onstats={(f) => setTab(f.tab, f)} />
 							{/each}
 						{/if}
 
@@ -376,16 +437,16 @@
 				</div>
 
 				{#if tab === 'overview'}
-					<StatTable columns={overviewCols} players={stats.players} parties={stats.parties} squad={stats.squad} {mode} {hideAbsent} />
+					<StatTable columns={overviewCols} players={stats.players} parties={stats.parties} squad={stats.squad} {mode} {hideAbsent} focus={focusStat} />
 				{:else if tab === 'boons'}
-					<StatTable columns={cols('boons', boonGroup)} players={stats.players} parties={stats.parties} squad={stats.squad} {mode} {hideAbsent} />
+					<StatTable columns={cols('boons', boonGroup)} players={stats.players} parties={stats.parties} squad={stats.squad} {mode} {hideAbsent} focus={focusStat} />
 					<p class="mt-2 text-xs text-faint">
 						Uptime: % of time the player had the boon (stability and might also as average stacks). Generation:
 						what this player gave each target in the group - % of time, and for stability/might also the average
 						stacks. Party and squad rows add up their members.
 					</p>
 				{:else if tab === 'positioning'}
-					<StatTable columns={[...cols('positioning'), overviewCols.find((c) => c.key === 'fight_dist_tag')!]} players={stats.players} parties={stats.parties} squad={stats.squad} {mode} {hideAbsent} />
+					<StatTable columns={[...cols('positioning'), overviewCols.find((c) => c.key === 'fight_dist_tag')!]} players={stats.players} parties={stats.parties} squad={stats.squad} {mode} {hideAbsent} focus={focusStat} />
 					<h2 class="section-title mt-6 mb-2">Downs during the fight</h2>
 					<div class="card overflow-auto">
 						<table class="w-full text-sm">
@@ -422,7 +483,7 @@
 						</table>
 					</div>
 				{:else}
-					<StatTable columns={cols(tab)} players={stats.players} parties={stats.parties} squad={stats.squad} {mode} {hideAbsent} />
+					<StatTable columns={cols(tab)} players={stats.players} parties={stats.parties} squad={stats.squad} {mode} {hideAbsent} focus={focusStat} />
 				{/if}
 			{/if}
 		{/if}

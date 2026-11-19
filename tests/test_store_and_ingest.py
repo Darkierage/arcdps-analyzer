@@ -125,3 +125,22 @@ def test_deleting_fights_removes_owned_files_only(tmp_path: Path):
     orphan.write_bytes(b"{}")
     assert cleanup_orphans(db, min_age_s=0) == 1 and not orphan.exists()
     assert (tmp_path / "arcdps").exists() and original.exists()
+
+
+def test_session_aggregate_lists_fights_behind_each_entry(tmp_path: Path):
+    db = Database(tmp_path / "t.db")
+    sid = db.create_session("Raid", "recording")
+    fids = []
+    for name in ("a", "b"):
+        fid = db.add_fight(f"/logs/{name}.zevtc", sid, 1.0)
+        a = analyze_ei(zerg(10, downs_at=[30, 30.5, 31, 31.5]), name, Settings())
+        db.save_analysis(fid, a.summary, a.stats, a.notes)
+        fids.append(fid)
+    agg = aggregate_session(db.session_analyses(sid))
+    for entry in agg["recurringIssues"] + agg["positives"]:
+        occ = entry["occurrences"]
+        assert [o["fightId"] for o in occ] == sorted(entry["fights"], key=lambda f: fids.index(f))
+        assert len(occ) == entry["count"]
+        for o in occ:
+            assert o["short"] and "{" not in o["short"] and o["findingKey"]
+            assert o["result"] and o["map"]

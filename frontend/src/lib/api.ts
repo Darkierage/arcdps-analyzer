@@ -139,6 +139,15 @@ export interface Finding {
 	cause: string;
 	fix: string;
 	related: string[];
+	/** Stat tab and column behind the finding (added by the API when serving a fight). */
+	focus?: FindingFocus | null;
+}
+
+export interface FindingFocus {
+	tab: string;
+	column: string;
+	/** 'asc' when the lowest values matter (default: highest first). */
+	sort?: 'asc' | 'desc';
 }
 
 export interface Notes {
@@ -179,6 +188,20 @@ export interface RecurringIssue {
 	losses: number;
 	severity: Severity;
 	fights: number[];
+	occurrences: Occurrence[];
+}
+
+/** One fight behind a session strength / recurring problem, with its code-written fact. */
+export interface Occurrence {
+	fightId: number;
+	start: string | null;
+	map: string | null;
+	result: Result | null;
+	mode: 'zerg' | 'gvg';
+	findingKey: string;
+	severity: Severity;
+	impact: number;
+	short: string;
 }
 
 export interface SessionAggregate {

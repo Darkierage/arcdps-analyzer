@@ -5,10 +5,13 @@ from __future__ import annotations
 from ..metrics.summary import Metrics
 from .base import Detector, Finding
 
+_STRIPS = {"tab": "support", "column": "strips"}
+
 
 class StripBalance(Detector):
     name = "strip_balance"
     label = "Losing the strip war"
+    focus = {"strip_balance": _STRIPS, "strip_balance_good": _STRIPS}
     description = (
         "Compares outgoing strips with boons stripped from the squad, and how concentrated the "
         "stripping was."

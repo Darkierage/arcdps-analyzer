@@ -172,6 +172,33 @@ also shows the standard per-player, per-party and per-squad log stats, like othe
     down left at a call-off.
   - The corpus has **no real GvG logs**: thresholds still need checking on real ones.
 
+## Strength and problem drill-down (2026-11-20)
+
+- **Why.** The session Summary listed strengths ("Won the strip war") and recurring problems
+  with only a fight count. There was no way to tell which fights earned them or which stat
+  drove them.
+- **Session aggregate.** Each strength and recurring problem lists its `occurrences`: fight id,
+  time, map, result, the real finding key (GvG variants included) and the template's one-line
+  `short` fact. They are ordered by impact, then by time. The facts come from code; no LLM is
+  involved.
+- **Deep links.** The fight page reads `?tab=`, `?finding=<key>`, `?stat=<column>`, `?sort=asc`
+  and `?from=session`:
+  - a finding link opens the debrief, expands "more" if needed, highlights and scrolls to the
+    card, and sets the timeline highlight when the finding has a window;
+  - tab changes update the URL with `replaceState`;
+  - `from=session` makes the back link return to the session.
+- **Focus stat.** Each detector declares `focus`: finding key -> `{tab, column, sort?}`, the
+  stat that best shows its evidence (strips, cleanses, stability uptime lowest first, ...). The
+  fight API adds it when it serves the notes, so stored analyses don't change and old fights
+  get the link without a re-analysis. Comp, outnumbered and player-outlier notes have no single
+  column and get none. "See stats" opens that tab, sorts by the column and tints it.
+- **No version bump.** Analysis output is unchanged, so `ANALYZER_VERSION` stays 3.
+- **Validation.**
+  - The 143 corpus logs analyzed before and after give byte-identical summaries and notes.
+  - A test checks that every focus names an existing template and a column on the stated tab.
+  - Checked in the running app: Won the strip war -> fight -> strips table, sorted by the top
+    strippers named in the note.
+
 ## Open items at the time of writing
 
 - No "Trends across sessions" page (original plan, phase 6).

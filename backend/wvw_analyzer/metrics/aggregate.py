@@ -58,11 +58,19 @@ def aggregate_session(items: list[dict[str, Any]]) -> dict[str, Any]:
                 key = (f.get("key") or f["detector"]).removesuffix("_gvg")
                 e = target.setdefault(key, {"key": key, "title": _strip_title(f["title"]),
                                             "count": 0, "fights": [], "losses": 0,
-                                            "severity": f["severity"]})
+                                            "severity": f["severity"], "occurrences": []})
                 if it["id"] not in e["fights"]:
                     e["count"] += 1
                     e["fights"].append(it["id"])
                     e["losses"] += s.get("result") == "loss"
+                    # What earned the entry in this fight: the code-written one-line fact.
+                    e["occurrences"].append({
+                        "fightId": it["id"], "start": s.get("start"), "map": s.get("map"),
+                        "result": s.get("result"), "mode": s.get("mode", "zerg"),
+                        "findingKey": f.get("key") or f["detector"],
+                        "severity": f["severity"], "impact": f.get("impact", 0.0),
+                        "short": f.get("short") or f.get("cause") or "",
+                    })
         for r in it["players"] or []:
             if not r.get("in_fight", True):
                 continue
@@ -94,6 +102,9 @@ def aggregate_session(items: list[dict[str, Any]]) -> dict[str, Any]:
                       "fights": r["fights"], "total": r[key],
                       "perFight": r[key] / max(r["fights"], 1)} for r in ranked],
         }
+
+    for e in (*issues.values(), *positives.values()):
+        e["occurrences"].sort(key=lambda o: (-(o["impact"] or 0), o["start"] or ""))
 
     n = max(len(items), 1)
     return {

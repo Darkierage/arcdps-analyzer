@@ -6,10 +6,13 @@ from ..metrics.summary import Metrics
 from .base import Detector, Finding
 from .util import LOG_WARMUP_S, clusters, down_weight, fmt_time, pct, window_mean
 
+_UP_STAB = {"tab": "boons", "column": "up_1122", "sort": "asc"}  # who lacked stab first
+
 
 class StabGapDeaths(Detector):
     name = "stab_gap_deaths"
     label = "Stability gap during enemy bomb"
+    focus = {"stab_gap_deaths": _UP_STAB, "stab_gap_deaths_nostab": _UP_STAB}
     description = (
         "Finds bursts of squad downs and checks the stability coverage of the affected parties "
         "in the seconds before."

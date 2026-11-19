@@ -10,7 +10,10 @@ A local desktop app for Guild Wars 2 **WvW (zerg) fights**. It turns arcdps logs
 - **Standard log stats.** Boon uptime and generation, damage, down contribution, damage to downed
   enemies, strips, cleanses, healing, defense and positioning. Each is shown per player, per party
   and for the squad.
-- **Sessions.** One per raid night, with aggregated stats, leaderboards and recurring problems.
+- **Sessions.** One per raid night, with aggregated stats, leaderboards, recurring problems and
+  strengths. Click a problem or strength to see the fights behind it, each with its numbers;
+  a fight opens its debrief at that note. **See stats** on a note opens the stat table behind
+  it, sorted by that column (for example strips for "Won the strip war").
 - **An optional local LLM debrief.** Qwen3 via llama.cpp rewrites the findings into a
   paste-ready text. Everything else is fully static and needs no LLM.
 

@@ -2,9 +2,9 @@
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
-	import { api, type Column, type SessionDetail } from '#lib/api.ts';
+	import { api, type Column, type Occurrence, type SessionDetail } from '#lib/api.ts';
 	import { live, toasts } from '#lib/live.svelte.ts';
-	import { compact, dateLabel, duration, fmtValue, profColor } from '#lib/format.ts';
+	import { compact, dateLabel, duration, fmtValue, profColor, timeOfDay } from '#lib/format.ts';
 	import FightList from '#lib/components/FightList.svelte';
 	import StatTable from '#lib/components/StatTable.svelte';
 	import Badge, { severityBar } from '#lib/components/Badges.svelte';
@@ -16,6 +16,9 @@
 	let editing = $state(false);
 	let name = $state('');
 	let tab = $state<'summary' | 'players' | 'fights'>('summary');
+	let open = $state<string | null>(null); // expanded strength / problem row
+
+	const toggle = (k: string) => (open = open === k ? null : k);
 
 	async function load() {
 		try {
@@ -87,6 +90,27 @@
 	);
 	const boardFmt = (key: string) => agg?.columns.find((c) => c.key === key)?.fmt ?? 'num';
 </script>
+
+{#snippet occurrences(list: Occurrence[] | undefined)}
+	<ul class="border-t border-line/50 bg-panel-2/40 py-1">
+		{#each list ?? [] as o}
+			<li>
+				<a href="/fights/{o.fightId}?finding={encodeURIComponent(o.findingKey)}&from=session"
+					class="group flex items-start gap-3 px-4 py-2 text-xs hover:bg-panel-2" title="Open this fight's debrief at this note">
+					<span class="tabular w-16 shrink-0 pt-0.5 whitespace-nowrap text-muted">{timeOfDay(o.start)}</span>
+					<span class="w-12 shrink-0">{#if o.result}<Badge result={o.result} />{/if}</span>
+					<span class="min-w-0 flex-1">
+						<span class="block text-faint">{o.map ?? ''}{o.mode === 'gvg' ? ' · GvG' : ''}</span>
+						<span class="block text-text">{o.short}</span>
+					</span>
+					<Icon name="chevron" class="mt-0.5 size-3.5 shrink-0 text-faint group-hover:text-accent" />
+				</a>
+			</li>
+		{:else}
+			<li class="px-4 py-2 text-xs text-faint">No fights.</li>
+		{/each}
+	</ul>
+{/snippet}
 
 <div class="page">
 	<a href="/sessions" class="mb-4 inline-flex items-center gap-1.5 text-sm text-muted hover:text-text">
@@ -180,18 +204,24 @@
 					{/if}
 					<div class="card divide-y divide-line">
 						{#each agg.recurringIssues.slice(0, 10) as r}
-							<div class="flex items-center gap-3 px-4 py-3">
-								<span class="h-8 w-1 rounded-full {severityBar[r.severity]}"></span>
-								<div class="min-w-0 flex-1">
-									<div class="truncate text-sm font-medium">{r.title}</div>
-									<div class="mt-1 flex h-1.5 overflow-hidden rounded-full bg-raised">
-										<div class="bg-accent/70" style="width:{r.share}%"></div>
+							{@const k = `issue:${r.key}`}
+							<div>
+								<button class="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-panel-2" aria-expanded={open === k}
+									onclick={() => toggle(k)} title="Show the fights with this problem">
+									<span class="h-8 w-1 rounded-full {severityBar[r.severity]}"></span>
+									<div class="min-w-0 flex-1">
+										<div class="truncate text-sm font-medium">{r.title}</div>
+										<div class="mt-1 flex h-1.5 overflow-hidden rounded-full bg-raised">
+											<div class="bg-accent/70" style="width:{r.share}%"></div>
+										</div>
 									</div>
-								</div>
-								<div class="tabular text-right text-xs">
-									<div class="text-text">{r.count}/{totals.fights} fights</div>
-									<div class="text-faint">{r.losses} in losses</div>
-								</div>
+									<div class="tabular text-right text-xs">
+										<div class="text-text">{r.count}/{totals.fights} fights</div>
+										<div class="text-faint">{r.losses} in losses</div>
+									</div>
+									<Icon name="chevron" class="size-4 shrink-0 text-faint transition {open === k ? 'rotate-90' : ''}" />
+								</button>
+								{#if open === k}{@render occurrences(r.occurrences)}{/if}
 							</div>
 						{/each}
 					</div>
@@ -199,9 +229,16 @@
 						<h2 class="pt-2 text-base font-semibold">Strengths</h2>
 						<div class="card divide-y divide-line">
 							{#each agg.positives as r}
-								<div class="flex items-center justify-between px-4 py-2.5 text-sm">
-									<span class="flex items-center gap-2"><Icon name="check" class="size-4 text-win" />{r.title}</span>
-									<span class="tabular text-xs text-faint">{r.count} fights</span>
+								{@const k = `pos:${r.key}`}
+								<div>
+									<button class="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm hover:bg-panel-2" aria-expanded={open === k}
+										onclick={() => toggle(k)} title="Show the fights that earned this">
+										<Icon name="check" class="size-4 text-win" />
+										<span class="flex-1">{r.title}</span>
+										<span class="tabular text-xs text-faint">{r.count} fight{r.count === 1 ? '' : 's'}</span>
+										<Icon name="chevron" class="size-4 shrink-0 text-faint transition {open === k ? 'rotate-90' : ''}" />
+									</button>
+									{#if open === k}{@render occurrences(r.occurrences)}{/if}
 								</div>
 							{/each}
 						</div>

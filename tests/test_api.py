@@ -131,3 +131,26 @@ def test_check_non_wvw_upload_and_cancel(tmp_path: Path, monkeypatch):
                             content=_evtc(1)).json()
         assert again["added"] == 1
     paths.data_dir.cache_clear()
+
+
+def test_fight_findings_carry_focus_stat(tmp_path: Path):
+    from wvw_analyzer.detectors.registry import focus_map
+    from wvw_analyzer.metrics.columns import ALL_COLUMNS
+    from wvw_analyzer.notes.templates import templates
+
+    keys = {c.key: c.tab for c in ALL_COLUMNS}
+    for fkey, focus in focus_map().items():
+        assert fkey in templates(), fkey
+        assert keys.get(focus["column"]) == focus["tab"], (fkey, focus)
+
+    client, state = make_client(tmp_path)
+    with client:
+        sid = state.db.create_session("Raid", "recording")
+        fid = state.db.add_fight("/x/a.zevtc", sid, 0)
+        a = analyze_ei(zerg(10, downs_at=[30, 30.5, 31, 31.5]), "a", Settings())
+        state.db.save_analysis(fid, a.summary, a.stats, a.notes)
+        notes = client.get(f"/api/fights/{fid}").json()["notes"]
+        found = notes["issues"] + notes["more"] + notes["positives"]
+        assert all("focus" in f for f in found)
+        assert any(f["focus"] for f in found)
+        assert "focus" not in state.db.analysis(fid)["notes"]["issues"][0]  # served, not stored

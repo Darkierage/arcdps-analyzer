@@ -51,6 +51,22 @@ def describe(overrides: dict[str, dict[str, Any]] | None = None) -> list[dict[st
     return out
 
 
+def focus_map() -> dict[str, dict[str, str]]:
+    """Finding key -> {"tab", "column"} of the stat behind it (static detector metadata)."""
+    return {k: v for cls in DETECTORS for k, v in cls.focus.items()}
+
+
+def add_focus(notes: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Attach the focus stat to stored findings when serving them (no re-analysis needed)."""
+    if not notes:
+        return notes
+    fm = focus_map()
+    for bucket in ("issues", "more", "positives"):
+        for f in notes.get(bucket) or []:
+            f["focus"] = fm.get(f.get("key") or f.get("detector"))
+    return notes
+
+
 def run_all(m: Metrics, detectors: list[Detector]) -> list[Finding]:
     findings: list[Finding] = []
     for det in detectors:

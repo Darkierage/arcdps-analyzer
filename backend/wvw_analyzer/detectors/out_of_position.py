@@ -12,6 +12,7 @@ from .util import down_weight
 class OutOfPosition(Detector):
     name = "out_of_position"
     label = "Caught out of position"
+    focus = {"out_of_position": {"tab": "positioning", "column": "dist_to_com"}}
     description = "Downs far from the tag or the squad's center (stragglers, backline caught)."
     defaults = {
         "far_tag": 1000,  # inches from the commander

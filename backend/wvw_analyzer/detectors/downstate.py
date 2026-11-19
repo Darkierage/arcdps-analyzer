@@ -5,10 +5,15 @@ from __future__ import annotations
 from ..metrics.summary import Metrics
 from .base import Detector, Finding
 
+_RES = {"tab": "support", "column": "resurrects"}
+_CLEAVE = {"tab": "offense", "column": "against_downed"}
+
 
 class Downstate(Detector):
     name = "downstate"
     label = "Downstate play"
+    focus = {"downstate_own": _RES, "downstate_own_gvg": _RES,
+             "downstate_enemy": _CLEAVE, "downstate_enemy_good": _CLEAVE}
     description = (
         "How many of our downs turned into deaths (rez / rally) and how many enemy downs we "
         "converted into kills (cleaving downs)."

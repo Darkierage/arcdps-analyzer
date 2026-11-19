@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { Finding } from '#lib/api.ts';
+	import type { Finding, FindingFocus } from '#lib/api.ts';
 	import { duration } from '#lib/format.ts';
 	import Badge, { severityBar } from './Badges.svelte';
 	import Icon from './Icon.svelte';
@@ -8,19 +8,24 @@
 		finding,
 		rank = null,
 		active = false,
-		onfocus
+		onfocus,
+		onstats
 	}: {
 		finding: Finding;
 		rank?: number | null;
 		active?: boolean;
 		onfocus?: (w: [number, number] | null) => void;
+		onstats?: (f: FindingFocus) => void;
 	} = $props();
+
+	const focus = $derived(onstats ? (finding.focus ?? null) : null);
 
 	const positive = $derived(finding.severity === 'positive');
 </script>
 
 <article
-	class="card relative overflow-hidden transition {active ? 'border-accent/60 ring-1 ring-accent/30' : ''}"
+	id="finding-{finding.key}"
+	class="card scroll-mt-4 relative overflow-hidden transition {active ? 'border-accent/60 ring-1 ring-accent/30' : ''}"
 >
 	<div class="absolute inset-y-0 left-0 w-1 {severityBar[finding.severity]}"></div>
 	<div class="py-4 pr-4 pl-5">
@@ -42,14 +47,23 @@
 				<p><span class="mr-1 font-medium text-accent">Change:</span>{finding.fix}</p>
 			</div>
 		{/if}
-		{#if finding.related.length || (finding.window && onfocus)}
+		{#if finding.related.length || (finding.window && onfocus) || focus}
 			<div class="mt-3 flex flex-wrap items-center gap-2">
 				{#each finding.related as r}
 					<span class="chip bg-raised text-faint" title="Related finding in the same moment">+ {r}</span>
 				{/each}
-				{#if finding.window && onfocus}
+				{#if focus}
 					<button
 						class="ml-auto flex items-center gap-1.5 text-xs text-accent hover:underline"
+						title="Open the stat table behind this note"
+						onclick={() => focus && onstats?.(focus)}
+					>
+						<Icon name="chart" class="size-3.5" /> See stats
+					</button>
+				{/if}
+				{#if finding.window && onfocus}
+					<button
+						class="{focus ? '' : 'ml-auto'} flex items-center gap-1.5 text-xs text-accent hover:underline"
 						onclick={() => onfocus?.(active ? null : finding.window)}
 					>
 						<Icon name="target" class="size-3.5" />

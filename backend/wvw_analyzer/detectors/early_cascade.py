@@ -10,6 +10,7 @@ from .util import down_weight, fmt_time, round_note
 class EarlyCascade(Detector):
     name = "early_cascade"
     label = "Lost the opening"
+    focus = {"early_cascade": {"tab": "defense", "column": "downs"}}
     description = (
         "Checks whether the squad suffered several downs early in the engagement before the "
         "enemy took any losses, which usually snowballs."

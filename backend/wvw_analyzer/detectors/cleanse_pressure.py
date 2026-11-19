@@ -15,6 +15,7 @@ from .util import pct, window_mean
 class CleansePressure(Detector):
     name = "cleanse_pressure"
     label = "Condition pressure"
+    focus = {"cleanse_pressure": {"tab": "support", "column": "cleanses"}}
     description = (
         "The squad carried many conditions during the fight and players went down covered in "
         "conditions."

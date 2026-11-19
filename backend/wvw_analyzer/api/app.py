@@ -255,7 +255,8 @@ def create_app(state: AppState) -> FastAPI:
             raise HTTPException(404, "Fight not found")
         a = state.db.analysis(fight_id) or {}
         debrief, unverified = _split_debrief(a.get("debrief"))
-        return {"fight": f, "stats": a.get("stats"), "notes": a.get("notes"),
+        notes = registry.add_focus(a.get("notes"))
+        return {"fight": f, "stats": a.get("stats"), "notes": notes,
                 "debrief": debrief, "debriefUnverified": unverified,
                 "debriefAt": a.get("debriefAt")}
 

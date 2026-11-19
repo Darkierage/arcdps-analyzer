@@ -8,10 +8,13 @@ from ..metrics.summary import Metrics
 from .base import Detector, Finding
 from .util import round_note
 
+_HEAL = {"tab": "support", "column": "healing"}
+
 
 class SustainDecline(Detector):
     name = "sustain_decline"
     label = "Sustain ran out"
+    focus = {"sustain_decline": _HEAL, "sustain_low": _HEAL}
     description = (
         "Compares healing + barrier against damage taken in the first and second half of the "
         "engagement (needs the arcdps healing addon)."

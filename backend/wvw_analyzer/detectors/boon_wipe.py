@@ -12,6 +12,7 @@ from .util import LOG_WARMUP_S, down_weight, fmt_time
 class BoonWipe(Detector):
     name = "boon_wipe"
     label = "Enemy strip bomb"
+    focus = {"boon_wipe": {"tab": "defense", "column": "incoming_strips"}}
     description = (
         "Detects moments where the squad's average boon count collapsed within seconds and downs "
         "followed (enemy strips/corrupts landing)."

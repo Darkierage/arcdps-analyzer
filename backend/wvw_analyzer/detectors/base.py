@@ -35,6 +35,9 @@ class Detector:
     label: ClassVar[str]
     description: ClassVar[str] = ""
     defaults: ClassVar[dict[str, Any]] = {}
+    # Template key -> the fight-page stat that best shows the evidence: {"tab", "column"} and
+    # optionally "sort": "asc" when the lowest values matter (default: highest first).
+    focus: ClassVar[dict[str, dict[str, str]]] = {}
 
     def __init__(self, overrides: dict[str, Any] | None = None):
         overrides = overrides or {}
