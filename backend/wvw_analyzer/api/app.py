@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -25,6 +24,8 @@ from ..metrics.aggregate import aggregate_session
 from ..notes import templates
 from ..state import AppState
 from ..store.files import remove_fight_files
+from . import overlay
+from .debrief import split_debrief
 
 log = logging.getLogger(__name__)
 
@@ -61,18 +62,6 @@ def _day_ts(s: str | None, end: bool = False) -> float | None:
     if end:
         d = d.replace(hour=23, minute=59, second=59)
     return d.timestamp()
-
-
-def _split_debrief(text: str | None) -> tuple[str | None, list[str]]:
-    if not text:
-        return None, []
-    body, sep, tail = text.rpartition("\n\n")
-    if sep and tail.startswith('{"unverified"'):
-        try:
-            return body, json.loads(tail)["unverified"]
-        except (json.JSONDecodeError, KeyError):
-            pass
-    return text, []
 
 
 # The API only serves this machine. Requests must address a local host name (blocks DNS
@@ -117,12 +106,15 @@ def create_app(state: AppState) -> FastAPI:
             return JSONResponse({"detail": "Forbidden origin"}, status_code=403)
         return await call_next(request)
 
+    app.include_router(overlay.router(state))
+
     # ---- status -----------------------------------------------------------------------
     @app.get("/api/status")
     def status() -> dict[str, Any]:
         s = state.config.settings
         ei = s.resolved_ei_path()
         return {
+            "app": "wvw-analyzer",  # lets the in-game addon recognize this server
             "version": __version__,
             "onboarded": s.onboarded,
             "fightMode": s.fight_mode,
@@ -254,7 +246,7 @@ def create_app(state: AppState) -> FastAPI:
         if not f:
             raise HTTPException(404, "Fight not found")
         a = state.db.analysis(fight_id) or {}
-        debrief, unverified = _split_debrief(a.get("debrief"))
+        debrief, unverified = split_debrief(a.get("debrief"))
         notes = registry.add_focus(a.get("notes"))
         return {"fight": f, "stats": a.get("stats"), "notes": notes,
                 "debrief": debrief, "debriefUnverified": unverified,

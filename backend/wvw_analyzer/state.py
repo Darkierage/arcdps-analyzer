@@ -7,6 +7,7 @@ import logging
 import threading
 import time
 
+from . import addon_install
 from .analysis import ANALYZER_VERSION
 from .config import ConfigStore
 from .events import EventBus
@@ -43,6 +44,8 @@ class AppState:
             for fid in stale:
                 self.processor.enqueue(fid)
         self.recorder.start_auto_watch()
+        threading.Thread(target=addon_install.auto_update, args=(self.config.settings.gw2_dir,),
+                         name="addon-update", daemon=True).start()
         threading.Thread(target=self._auto_debrief_loop, name="auto-debrief", daemon=True).start()
 
     def stop(self) -> None:

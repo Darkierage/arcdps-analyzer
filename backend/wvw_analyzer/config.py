@@ -57,6 +57,7 @@ class Settings(BaseModel):
     onboarded: bool = False  # first-run setup screen completed
     log_dir: str | None = None
     ei_path: str | None = None
+    gw2_dir: str | None = None  # Guild Wars 2 folder for the in-game overlay; None = detect
     host: str = "127.0.0.1"
     port: int = 8765
     filters: FilterSettings = Field(default_factory=FilterSettings)

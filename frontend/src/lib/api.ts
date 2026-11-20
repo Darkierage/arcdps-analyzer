@@ -297,6 +297,7 @@ export interface SelfTest {
 }
 
 export interface AppStatus {
+	app: string;
 	version: string;
 	onboarded: boolean;
 	fightMode: FightMode;
@@ -315,6 +316,19 @@ export interface DetectorInfo {
 	defaults: Record<string, number | boolean>;
 	enabled: boolean;
 	config: Record<string, number | boolean>;
+}
+
+/** In-game overlay (Nexus addon) install state: GET /api/overlay-addon. */
+export interface OverlayAddonStatus {
+	gw2Dir: string | null;
+	override: string | null;
+	nexus: boolean;
+	arcdps: boolean;
+	bundled: boolean;
+	installed: boolean;
+	upToDate: boolean;
+	gameRunning: boolean | null;
+	nexusUrl: string;
 }
 
 export interface SettingsResponse {
@@ -403,5 +417,9 @@ export const api = {
 	settings: () => request<SettingsResponse>('GET', '/api/settings'),
 	saveSettings: (patch: unknown) => request<SettingsResponse>('PUT', '/api/settings', patch),
 	llmSetup: () => request<LlmStatus>('POST', '/api/llm/setup'),
-	llmUnload: () => request<LlmStatus>('POST', '/api/llm/unload')
+	llmUnload: () => request<LlmStatus>('POST', '/api/llm/unload'),
+	overlayAddon: () => request<OverlayAddonStatus>('GET', '/api/overlay-addon'),
+	installOverlayAddon: (gw2Dir: string | null) =>
+		request<OverlayAddonStatus>('POST', '/api/overlay-addon/install', { gw2Dir: gw2Dir ?? '' }),
+	uninstallOverlayAddon: () => request<OverlayAddonStatus>('POST', '/api/overlay-addon/uninstall')
 };

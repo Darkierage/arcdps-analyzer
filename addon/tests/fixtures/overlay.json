@@ -1,0 +1,91 @@
+{
+  "schema": 1,
+  "version": "0.5.0",
+  "recording": {
+    "active": false,
+    "logDirOk": true
+  },
+  "queue": {
+    "pending": 0,
+    "busy": false
+  },
+  "session": {
+    "id": 1,
+    "name": "Raid",
+    "fights": 2,
+    "record": "2L",
+    "kills": 0,
+    "deaths": 8,
+    "kdr": 0.0,
+    "duration": "2:00",
+    "problems": [
+      {
+        "title": "Outnumbered",
+        "severity": "major",
+        "count": 2,
+        "losses": 2
+      },
+      {
+        "title": "Parties without support",
+        "severity": "minor",
+        "count": 2,
+        "losses": 2
+      },
+      {
+        "title": "Losing the strip war",
+        "severity": "minor",
+        "count": 2,
+        "losses": 2
+      },
+      {
+        "title": "Lost the opening exchange",
+        "severity": "critical",
+        "count": 1,
+        "losses": 1
+      }
+    ],
+    "strengths": [],
+    "recording": false,
+    "latestId": 2
+  },
+  "fight": {
+    "id": 2,
+    "status": "done",
+    "mode": "zerg",
+    "result": "loss",
+    "title": "20:00  Seared Borderlands  1:00",
+    "resultLine": "Result: loss - 0 kills for 4 deaths, 10 vs 20 enemies, 1:00.",
+    "framing": null,
+    "issues": [
+      {
+        "severity": "major",
+        "title": "Outnumbered (2.0x)",
+        "short": "20 enemies against our 10 (2.0x).",
+        "fix": "Use chokes, walls and siege against bigger groups."
+      },
+      {
+        "severity": "minor",
+        "title": "Parties without support",
+        "short": "parties 1, 2 lacked stability; 4 downs in them.",
+        "fix": "Give each party a stab provider and a healer/cleanser."
+      },
+      {
+        "severity": "minor",
+        "title": "Losing the strip war",
+        "short": "we lost 0 boons to strips and stripped 0; real strippers: 0.",
+        "fix": "More strip builds; strip right before our bomb."
+      }
+    ],
+    "positives": [],
+    "debrief": [
+      "Result: loss",
+      "- Why: stab ran out",
+      "- Went well: strips"
+    ],
+    "debriefUnverified": 0,
+    "index": 2,
+    "count": 2,
+    "prevId": 1,
+    "nextId": null
+  }
+}

@@ -199,6 +199,73 @@ also shows the standard per-player, per-party and per-squad log stats, like othe
   - Checked in the running app: Won the strip war -> fight -> strips table, sorted by the top
     strippers named in the note.
 
+## In-game overlay (2026-11-20)
+
+- **Why.** Reading the debrief meant alt-tabbing out of the game. The overlay shows it in game.
+- **Nexus only.** The overlay is a Raidcore Nexus addon (API v6). Nexus already loads arcdps
+  and gives addons an ImGui context, render callbacks, Quick Access icons, keybinds and
+  MumbleLink. A plain arcdps extension was left out: arcdps now builds with ImGui 1.92, while
+  Nexus (and the `arcdps-imgui` bindings) use 1.80, so it would be a second UI integration.
+- **Rust with nexus-rs** (Zerthox, pinned git rev), cross-compiled from WSL with cargo-xwin and
+  clang-cl/lld-link. No Windows toolchain is needed. The C runtime is linked statically (no VC++
+  redistributable). `model`, `client` and `settings` are platform-independent and tested on
+  Linux; only the Nexus glue (`addon.rs`, `ui.rs`) is Windows-only.
+- **Crash safety.** The addon runs inside the game process. nexus-rs doesn't catch panics in
+  callbacks, and its `panic` features show a message box over the game, so they are off. Every
+  callback runs under `catch_unwind`: a panic is logged and the overlay stops drawing until it's
+  reloaded. (The plan said `panic = "abort"`; that would have closed the game instead.)
+- **Dumb renderer.** `GET /api/overlay` sends finished, code-written strings: the fight
+  (title, `result_line` and `framing_line` from `llm/prompts.py`, ranked notes with `short` and
+  `fix_short`, positives, the stored LLM debrief if any, previous and next fight ids) and the
+  session (record, kills and deaths, top 5 recurring problems, top 3 strengths, `latestId`). The
+  addon only lays them out, so wording or analysis changes need no addon update. `schema` is 1;
+  the addon refuses a newer schema with "Update the in-game addon". `addon/tests/fixtures/
+  overlay.json` is the contract: the Python test checks that the payload still has its shape
+  and the Rust tests parse it.
+- **Polling.** A background thread polls every 2 s with `If-None-Match` (an unchanged payload is
+  a 304) and searches ports 8765–8785 every 5 s when the app isn't found. It recognizes the app
+  by `"app": "wvw-analyzer"` in `/api/status`. The render thread never does I/O.
+- **Local-only API unchanged.** A native client sends Host `127.0.0.1` and no Origin, which the
+  existing middleware already allows, including the recording POSTs.
+- **Auto-show.** When `latestId` changes, the window opens once MumbleLink says the player is
+  out of combat (on by default). "Hide in combat" is on by default.
+- **ToS.** ArenaNet approves no add-ons, arcdps and Nexus included. The overlay keeps to what
+  that setup already does: it only draws a window through Nexus; it reads no game memory and
+  installs no hooks of its own; it sends no input, chat or game actions; its content comes from
+  finished log files via the app; the only game state it reads is MumbleLink's in-combat flag;
+  it connects only to 127.0.0.1. There is no clipboard or chat output, so posting a debrief
+  stays a manual player action.
+- **Install from the app.** `addon_install.py` finds the GW2 folder (a Settings override, the
+  running `Gw2-64.exe`, then Program Files) and requires `addons/Nexus/`. It copies the bundled
+  `bin/addon/WvWAnalyzer.dll` to `addons/WvWAnalyzer.dll.part` and renames it into place, so
+  Nexus never sees half a file. It never touches anything but that DLL and the addon's
+  `addons/WvWAnalyzer/` settings folder, and it never installs Nexus or arcdps. A locked DLL
+  (game running) gives "Close the game". `addons/` is writable without admin once Nexus is
+  installed.
+- **The app is the only updater.** The addon declares `UpdateProvider::None`. "Up to date"
+  means the installed DLL's SHA-256 matches the bundled one. On Windows the app updates an
+  installed addon at startup when the game isn't running, so the app and addon versions can't
+  drift.
+- **Validation.**
+  - Python: payload, browsing, ETag 304, empty database, native-client recording calls allowed
+    and foreign origins refused; installer against a fake GW2 folder (Nexus present/absent,
+    install, idempotent update, uninstall leaves other files, locked DLL, auto-update rules).
+  - Rust: fixture parsing, unknown and missing fields, newer schema, settings round trip, and
+    the client against a fake analyzer (discovery, ETag, action errors, quick stop).
+  - On the dev data: `/api/overlay` gives the real result line, session record and browsing
+    ids; a 304 takes about 8 ms; the GW2 folder and Nexus are detected from WSL.
+  - Analysis code is untouched, so `ANALYZER_VERSION` stays 3. Corpus tests pass.
+  - In game (2026-11-21, user check): Nexus loads the addon and the window shows the debrief
+    from the running analyzer.
+  - With the game running, the installer can't replace the loaded DLL and shows the "Close
+    the game" message; nothing is left behind.
+  - The Quick Access icon follows the game's menu-bar style (a flat khaki silhouette) after
+    the first, colored one stood out. Nexus shows icons that aren't hovered at about 43%
+    brightness, so the texture is a light near-white that shows as khaki, like the other
+    addons' icons. `scripts/draw_addon_icon.py` draws it.
+  - Packaged 0.5.0 build: the frozen app bundles the DLL, reports it installed and up to
+    date, and serves `/api/overlay`.
+
 ## Open items at the time of writing
 
 - No "Trends across sessions" page (original plan, phase 6).

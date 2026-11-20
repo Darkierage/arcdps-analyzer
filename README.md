@@ -14,6 +14,9 @@ A local desktop app for Guild Wars 2 **WvW (zerg) fights**. It turns arcdps logs
   strengths. Click a problem or strength to see the fights behind it, each with its numbers;
   a fight opens its debrief at that note. **See stats** on a note opens the stat table behind
   it, sorted by that column (for example strips for "Won the strip war").
+- **An in-game overlay (optional).** A small window inside Guild Wars 2 with the latest fight's
+  notes and the session summary, so you don't have to alt-tab. It's a Raidcore Nexus addon,
+  installed from Settings.
 - **An optional local LLM debrief.** Qwen3 via llama.cpp rewrites the findings into a
   paste-ready text. Everything else is fully static and needs no LLM.
 
@@ -61,6 +64,32 @@ In GvG mode:
 
 The round gap and the grace time can be changed in Settings. Both are first guesses, set without
 real GvG logs.
+
+## In-game overlay (Nexus addon)
+
+The overlay shows the analyzer's results in game: the latest fight (result line, ranked notes
+with their fixes, what went well, the LLM debrief if one was written), older fights of the
+session with **<** / **>**, the session summary (record, kills and deaths, recurring problems,
+strengths) and a **Start / Stop recording** button.
+
+- **Requirements:** [Raidcore Nexus](https://raidcore.gg/Nexus) (it also loads arcdps), and
+  WvW Analyzer 0.5.0 or newer running on the same PC. Players using arcdps without Nexus aren't
+  supported yet.
+- **Install:** Settings → *In-game overlay* → **Install**. The Guild Wars 2 folder is found
+  automatically (or enter it). The app copies `WvWAnalyzer.dll` into `<Guild Wars 2>\addons`
+  and nothing else. **Remove** deletes that DLL and the addon's settings folder. After an app
+  upgrade the addon is updated on the next start while the game is closed, or with **Update**.
+- **In game:** the Quick Access icon or **ALT+SHIFT+W** (rebindable in Nexus) toggles the
+  window. Options in Nexus → Addons → WvW Analyzer: open the window when a new fight has been
+  analyzed (only once you're out of combat), hide it in combat, background opacity.
+- **What it does and doesn't do.** It only draws a window through Nexus. Everything in it comes
+  from the WvW Analyzer app over `127.0.0.1`, which works from finished arcdps logs like Elite
+  Insights does. The only game state it reads is MumbleLink's "in combat" flag (ArenaNet's
+  official interface, provided by Nexus), to hold back the auto-show. It doesn't read game
+  memory, send keys or chat, or connect anywhere else.
+- **At your own risk.** ArenaNet doesn't approve any third-party add-on, including arcdps and
+  Nexus. The overlay adds nothing beyond what that setup already does, but using it is your
+  decision.
 
 ## Detectors
 
@@ -126,6 +155,16 @@ uv run wvw-analyzer --no-window                # http://127.0.0.1:8765
 uv run pytest                                  # tests (+ corpus test if data/dev_corpus has EI JSON)
 ```
 
+The in-game overlay addon (`addon/`, Rust) is cross-compiled from WSL to a Windows DLL with
+[cargo-xwin](https://github.com/rust-cross/cargo-xwin). It needs rustup with the
+`x86_64-pc-windows-msvc` target, `cargo install cargo-xwin`, and clang-cl + lld-link (LLVM 18+;
+set `LLVM_BIN` if they aren't on `PATH`):
+
+```bash
+scripts/build_addon.sh                         # -> bin/addon/WvWAnalyzer.dll
+cd addon && cargo test && cargo clippy         # model, client and settings tests run on Linux
+```
+
 From WSL, the Windows `GuildWars2EliteInsights-CLI.exe` runs through interop. It needs the
 .NET 10 runtime on Windows. Dev data (config, DB, EI cache) lives in `./data`.
 
@@ -151,7 +190,9 @@ Run `WvWAnalyzer-Setup-<version>.exe`.
 ## Building the app and installer
 
 Requires uv, Node.js 22.17+ (or `-SkipFrontend` with a prebuilt `frontend/build`) and Inno Setup 6
-(`winget install JRSoftware.InnoSetup`). In PowerShell, from the repo root:
+(`winget install JRSoftware.InnoSetup`). The overlay addon is built in WSL first
+(`scripts/build_addon.sh`); copy `bin/addon/` along with the repo. In PowerShell, from the repo
+root:
 
 ```powershell
 ./scripts/build_windows.ps1                # -> dist\WvWAnalyzer-Setup-<version>.exe
@@ -161,7 +202,7 @@ Requires uv, Node.js 22.17+ (or `-SkipFrontend` with a prebuilt `frontend/build`
 The build does the following:
 - downloads the pinned Elite Insights, .NET runtime and WebView2 bootstrapper, verifying their
   checksums or signature;
-- builds the app with PyInstaller;
+- builds the app with PyInstaller and bundles `bin\addon\WvWAnalyzer.dll`;
 - compiles `packaging/installer.iss`.
 
 The version comes from `backend/wvw_analyzer/__init__.py`.
@@ -174,7 +215,9 @@ The version comes from `backend/wvw_analyzer/__init__.py`.
 - `backend/wvw_analyzer/notes`: ranking, merging and templates
 - `backend/wvw_analyzer/llm`: llama-server lifecycle and debrief prompt
 - `backend/wvw_analyzer/api`: FastAPI REST and WebSocket; serves the built UI
+- `backend/wvw_analyzer/addon_install.py`: install, update and remove the in-game overlay
+- `addon/`: the in-game overlay, a Rust Nexus addon (nexus-rs)
 - `frontend/`: SvelteKit + Tailwind + ECharts
-- `scripts/`: tool setup, calibration, Windows build
+- `scripts/`: tool setup, calibration, addon and Windows builds
 - `packaging/`: PyInstaller spec, Inno Setup script, icon
 - `docs/`: decisions (`DECISIONS.md`) and the approved plans (`plans/`)

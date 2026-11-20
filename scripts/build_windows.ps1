@@ -2,6 +2,7 @@
 #   ./scripts/build_windows.ps1                 # full build -> dist\WvWAnalyzer-Setup-<version>.exe
 #   ./scripts/build_windows.ps1 -SkipFrontend   # reuse an existing frontend\build (e.g. built in WSL)
 #   ./scripts/build_windows.ps1 -NoInstaller    # only dist\WvWAnalyzer\ (no Inno Setup needed)
+# The in-game overlay addon is built in WSL (scripts/build_addon.sh); copy bin\addon\ over first.
 # Requires: uv, Node.js 22.17+ (unless -SkipFrontend), Inno Setup 6 for the installer
 # (winget install JRSoftware.InnoSetup).
 param([switch]$SkipFrontend, [switch]$NoInstaller)
@@ -18,6 +19,10 @@ $version = (Select-String -Path backend\wvw_analyzer\__init__.py -Pattern '__ver
 Write-Host "WvW Analyzer $version"
 
 Step "Python deps" { uv sync }
+
+if (-not (Test-Path bin\addon\WvWAnalyzer.dll)) {
+    throw "bin\addon\WvWAnalyzer.dll missing - build it in WSL with scripts/build_addon.sh and copy bin\addon over"
+}
 
 if ($SkipFrontend) {
     if (-not (Test-Path frontend\build\index.html)) { throw "frontend\build missing - build it first" }
@@ -39,6 +44,7 @@ Write-Host "== Bundle tools"
 New-Item -ItemType Directory -Force dist\WvWAnalyzer\bin | Out-Null
 Copy-Item -Recurse -Force bin\GW2EI dist\WvWAnalyzer\bin\
 Copy-Item -Recurse -Force bin\dotnet dist\WvWAnalyzer\bin\
+Copy-Item -Recurse -Force bin\addon dist\WvWAnalyzer\bin\
 
 if ($NoInstaller) {
     Write-Host "Done: dist\WvWAnalyzer\WvWAnalyzer.exe (no installer)"

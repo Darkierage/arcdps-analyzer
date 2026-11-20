@@ -2,7 +2,7 @@
 
 A local Windows desktop app that analyzes Guild Wars 2 arcdps **WvW** logs: rule-based debriefs
 ("why lost / what to change"), standard log stats, a recording mode, an optional local LLM
-debrief, and a GvG mode. Backend: Python 3.12, FastAPI, SQLite. Frontend: SvelteKit 3 / Svelte 5,
+debrief, a GvG mode, and an in-game overlay (a Rust Nexus addon in `addon/`). Backend: Python 3.12, FastAPI, SQLite. Frontend: SvelteKit 3 / Svelte 5,
 Tailwind 4, ECharts, in a pywebview window. Packaged with PyInstaller and an Inno Setup installer.
 
 ## Project docs (keep them current)
@@ -30,6 +30,8 @@ cd frontend && npm run check              # svelte-check / TypeScript
 cd frontend && npm run build              # the backend serves frontend/build
 uv run wvw-analyzer --no-window           # http://127.0.0.1:8765 (dev data in ./data)
 uv run python scripts/setup_tools.py      # Elite Insights CLI -> ./bin (--llm for llama + model)
+scripts/build_addon.sh                    # in-game overlay -> bin/addon/WvWAnalyzer.dll (cargo-xwin)
+cd addon && cargo test && cargo clippy    # addon tests (run on Linux); also cargo xwin clippy
 ```
 
 ## Environment
@@ -41,8 +43,11 @@ uv run python scripts/setup_tools.py      # Elite Insights CLI -> ./bin (--llm f
     over, and pass `-SkipFrontend`.
   - The script fails with a hint if Inno Setup is missing.
   - Installing tools on the user's Windows needs their OK.
-- **Versions.** The version lives in `backend/wvw_analyzer/__init__.py`, `pyproject.toml` and
-  `uv.lock`; bump all three. Releases are tagged `vX.Y.Z` and the installer
+- **Overlay addon.** Built in WSL: rustup (+ `x86_64-pc-windows-msvc`), cargo-xwin, and
+  clang-cl/lld-link (`LLVM_BIN` if not on `PATH`). The Windows build script needs the prebuilt
+  `bin/addon/WvWAnalyzer.dll` copied over. Testing it needs the user in game.
+- **Versions.** The version lives in `backend/wvw_analyzer/__init__.py`, `pyproject.toml`,
+  `uv.lock` and `addon/Cargo.toml`; bump all four. Releases are tagged `vX.Y.Z` and the installer
   `dist/WvWAnalyzer-Setup-X.Y.Z.exe` is attached to a GitHub release (`gh`).
 
 ## Architecture
@@ -57,6 +62,10 @@ uv run python scripts/setup_tools.py      # Elite Insights CLI -> ./bin (--llm f
   - `metrics`: `timeline.py` (per-second series, engagement window, GvG rounds), `summary.py`
     (counts, result), `rounds.py`, `aggregate.py` (sessions).
   - `detectors`: one class per rule; `registry.py` lists them.
+  - `api/overlay.py` + `addon_install.py`: the overlay payload and installing the addon.
+  - `addon/`: the Nexus addon. It only renders the strings `/api/overlay` sends; the payload
+    shape is pinned by `addon/tests/fixtures/overlay.json` (regenerate with
+    `UPDATE_FIXTURES=1 uv run pytest tests/test_overlay_api.py`).
 - **Worker processes.** Each fight is analyzed in a short-lived spawn worker
   (`analysis_job`), so the large EI JSON is released afterwards.
 - **Fight mode.** Every fight row stores its own `mode` (`zerg`/`gvg`). `Settings.fight_mode` is
@@ -75,6 +84,8 @@ uv run python scripts/setup_tools.py      # Elite Insights CLI -> ./bin (--llm f
   from an older version are re-analyzed on startup.
 - **Keep the zerg path stable when adding modes or features.** Snapshot the analysis of
   `data/dev_corpus` before and after, and compare. GvG-only logic must not change zerg results.
+- **Overlay stays display-only** (ToS): no game memory, hooks, input, chat or clipboard
+  automation, no network beyond 127.0.0.1. Game state read: MumbleLink's in-combat flag only.
 - **Local-only API.** It only accepts a localhost Host header. State-changing requests and the
   WebSocket need a localhost Origin or none. Keep it that way.
 

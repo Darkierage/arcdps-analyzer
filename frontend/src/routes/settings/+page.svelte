@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { api, type SettingsResponse } from '#lib/api.ts';
+	import { api, type OverlayAddonStatus, type SettingsResponse } from '#lib/api.ts';
 	import { live, toasts } from '#lib/live.svelte.ts';
 	import Icon from '#lib/components/Icon.svelte';
 
@@ -23,6 +23,33 @@
 		}
 	}
 	onMount(load);
+
+	// In-game overlay (Nexus addon). The folder is a normal setting (s.gw2_dir); installing
+	// stores it too, so the main Save never brings back an old value.
+	let overlay = $state<OverlayAddonStatus | null>(null);
+	let overlayBusy = $state(false);
+	async function loadOverlay() {
+		try {
+			overlay = await api.overlayAddon();
+		} catch (e) {
+			toasts.error(e);
+		}
+	}
+	onMount(loadOverlay);
+
+	async function overlayAction(remove: boolean) {
+		overlayBusy = true;
+		try {
+			const was = overlay?.installed;
+			overlay = remove ? await api.uninstallOverlayAddon() : await api.installOverlayAddon(s.gw2_dir);
+			s.gw2_dir = overlay.override;
+			toasts.push(remove ? 'In-game overlay removed' : was ? 'In-game overlay updated' : 'In-game overlay installed', 'success');
+		} catch (e) {
+			toasts.error(e);
+		} finally {
+			overlayBusy = false;
+		}
+	}
 
 	async function save(reanalyze = false) {
 		saving = true;
@@ -200,6 +227,53 @@
 					</details>
 				{/each}
 			</div>
+		</section>
+
+		<section class="card mb-5 p-5" id="overlay">
+			<h2 class="mb-1 flex items-center gap-2 font-semibold"><Icon name="monitor" class="size-4 text-accent" />In-game overlay</h2>
+			<p class="mb-4 text-sm text-muted">
+				A small window inside Guild Wars 2 that shows the latest fight's notes, the session summary and a
+				Start/Stop recording button, so you don't have to alt-tab. It's an addon for
+				<a class="text-accent hover:underline" href={overlay?.nexusUrl ?? 'https://raidcore.gg/Nexus'} target="_blank" rel="noreferrer">Raidcore Nexus</a>
+				and needs this app running. It only displays what this app sends over 127.0.0.1: it doesn't read game memory,
+				send keys or post to chat. ArenaNet approves no third-party add-ons, so like arcdps and Nexus it's used at
+				your own risk.
+			</p>
+			<label class="label" for="gw2">Guild Wars 2 folder</label>
+			<input id="gw2" class="input" bind:value={s.gw2_dir} placeholder={overlay?.gw2Dir ?? 'C:\\Program Files\\Guild Wars 2'} />
+			<p class="mt-1 text-xs {overlay?.gw2Dir ? 'text-faint' : 'text-loss'}">
+				{#if overlay?.gw2Dir}Found: {overlay.gw2Dir}{:else if overlay}Gw2-64.exe not found - enter the folder{/if}
+			</p>
+			<div class="mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-line bg-panel-2 p-3 text-sm">
+				<span class="flex items-center gap-1.5">
+					<span class="size-2 rounded-full {overlay?.nexus ? 'bg-win' : 'bg-faint'}"></span> Nexus
+				</span>
+				<span class="flex items-center gap-1.5">
+					<span class="size-2 rounded-full {overlay?.installed ? (overlay.upToDate ? 'bg-win' : 'bg-major') : 'bg-faint'}"></span>
+					{overlay?.installed ? (overlay.upToDate ? 'Installed' : 'Update available') : 'Not installed'}
+				</span>
+				{#if overlay && overlay.gw2Dir && !overlay.nexus}
+					<span class="text-loss">Install Nexus first, then come back here.</span>
+				{:else if overlay && !overlay.bundled}
+					<span class="text-loss">This build doesn't include the addon.</span>
+				{:else if overlay?.gameRunning}
+					<span class="text-muted">Close the game to update or remove it.</span>
+				{/if}
+				<div class="ml-auto flex gap-2">
+					{#if overlay?.installed}
+						<button class="btn" disabled={overlayBusy} onclick={() => overlayAction(true)}>Remove</button>
+					{/if}
+					{#if !overlay?.installed || !overlay.upToDate}
+						<button class="btn btn-primary" disabled={overlayBusy || !overlay?.bundled} onclick={() => overlayAction(false)}>
+							{overlay?.installed ? 'Update' : 'Install'}
+						</button>
+					{/if}
+				</div>
+			</div>
+			<p class="mt-2 text-xs text-faint">
+				In game: the Quick Access icon or <b>ALT+SHIFT+W</b> toggles the window (rebind it in Nexus). Options are under
+				Nexus > Addons > WvW Analyzer.
+			</p>
 		</section>
 
 		<section class="card mb-10 p-5" id="llm">

@@ -1,0 +1,29 @@
+[package]
+name = "wvw_analyzer_overlay"
+version = "0.5.0"
+edition = "2024"
+authors = ["WvW Analyzer"]
+description = "Shows WvW Analyzer fight debriefs in game"
+publish = false
+
+[lib]
+name = "WvWAnalyzer"
+# Nexus shows the DLL file name; keep it readable.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ureq = { version = "3", default-features = false, features = ["json"] }
+
+# The Nexus glue only builds for Windows; model, client and settings are tested on Linux too.
+# No "panic" features: they show a message box over the game. Panics are caught in addon.rs.
+[target.'cfg(windows)'.dependencies]
+nexus = { git = "https://github.com/zerthox/nexus-rs", rev = "51bff5ab38ad11332316448b452ece1b773018cd", default-features = false, features = ["mumble", "log"] }
+log = "0.4"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
