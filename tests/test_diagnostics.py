@@ -232,6 +232,7 @@ def test_report_and_endpoints(tmp_path: Path, monkeypatch):
     opened: list[Path] = []
     monkeypatch.setattr(diagnostics, "open_folder", lambda p: opened.append(p) or True)
     client, state = make_client(tmp_path)
+    state.config.update({"ei_path": str(tmp_path / "missing" / "EI.exe")})  # whatever ./bin has
     (tmp_path / diagnostics.LOG_FILE).write_text(
         "".join(f"line {i}\n" for i in range(400)) + "ERROR boom\n", encoding="utf-8")
     sid = state.db.create_session("Raid", "recording")
