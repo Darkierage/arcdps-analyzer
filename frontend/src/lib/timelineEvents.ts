@@ -2,17 +2,13 @@
 // timeline and the boon timeline (their markers alone only show when).
 import type { EChartsType } from 'echarts/core';
 import type { Timeline } from '#lib/api.ts';
-import { duration, profColor } from '#lib/format.ts';
+import { duration, escapeHtml as esc, profColor } from '#lib/format.ts';
 
 const MAX_LINES = 8;
 const DOWN = '#f59e42';
 const DEAD = '#f2555a';
 
 type Chart = Pick<EChartsType, 'getZr' | 'convertToPixel' | 'convertFromPixel'>;
-
-function esc(s: string): string {
-	return s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
-}
 
 /** Which marker kinds are shown (a kind hidden in the chart's legend isn't listed either). */
 export interface Shown {

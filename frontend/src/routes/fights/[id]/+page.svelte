@@ -2,13 +2,17 @@
 	import { page } from '$app/state';
 	import { goto, pushState, replaceState } from '$app/navigation';
 	import { onMount, tick, untrack } from 'svelte';
-	import { api, type Column, type FightDetail, type FindingFocus } from '#lib/api.ts';
+	import { api, type Column, type FightDetail, type FindingFocus, type PlayerSeries, type Row } from '#lib/api.ts';
 	import { live, toasts } from '#lib/live.svelte.ts';
 	import { compact, dateLabel, duration, fmtValue, profColor, timeOfDay } from '#lib/format.ts';
 	import Badge from '#lib/components/Badges.svelte';
 	import FindingCard from '#lib/components/FindingCard.svelte';
 	import FightTimeline from '#lib/components/FightTimeline.svelte';
 	import BoonTimeline from '#lib/components/BoonTimeline.svelte';
+	import PlayerBoonChart from '#lib/components/PlayerBoonChart.svelte';
+	import PlayerTimelineChart from '#lib/components/PlayerTimelineChart.svelte';
+	import { findSeriesRow, seriesKey } from '#lib/players.ts';
+	import { sessionBackHref } from '#lib/sessionNav.ts';
 	import StatTable from '#lib/components/StatTable.svelte';
 	import Icon from '#lib/components/Icon.svelte';
 
@@ -17,7 +21,9 @@
 	let loading = $state(true);
 	let tab = $state('debrief');
 	let highlight = $state<[number, number] | null>(null);
-	// Timeline party: 'squad', a party's group number, or 'all' (stability per party; Debrief only).
+	// Timeline party: 'squad', a party's group number, 'player:<key>' (that squad row's own
+	// charts; the key is its `series_key`, or an account from a session link), or 'all'
+	// (stability per party; Debrief only).
 	let party = $state('squad');
 	let mode = $state<'player' | 'party'>('player');
 	let hideAbsent = $state(true);
@@ -68,7 +74,7 @@
 			const stat = q.get('stat');
 			pendingFinding = q.get('finding');
 			fromSession = q.get('from') === 'session';
-			party = q.get('party') ?? 'squad';
+			party = partyFromUrl(q);
 			focusFinding = null;
 			showMore = false;
 			tab = pendingFinding ? 'debrief' : tabs.some((x) => x.id === t) ? t! : 'debrief';
@@ -103,6 +109,7 @@
 			if (g) boonGroup = g;
 		}
 		const u = addressUrl();
+		withParty(u);
 		for (const k of ['tab', 'stat', 'sort', 'finding']) u.searchParams.delete(k);
 		if (t !== 'debrief') u.searchParams.set('tab', t);
 		if (focus) {
@@ -128,7 +135,7 @@
 			const q = addressUrl().searchParams;
 			const t = q.get('finding') ? 'debrief' : (q.get('tab') ?? 'debrief');
 			if (tabs.some((x) => x.id === t)) tab = t;
-			party = q.get('party') ?? 'squad';
+			party = partyFromUrl(q);
 		};
 		window.addEventListener('popstate', follow);
 		return () => window.removeEventListener('popstate', follow);
@@ -157,24 +164,73 @@
 		document.getElementById('fight-timeline')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 	}
 
-	/** Pick the timeline party and keep it in the URL (?party=2), like the tab. */
-	function setParty(p: string) {
-		party = p;
-		const u = addressUrl();
-		if (p === 'squad') u.searchParams.delete('party');
-		else u.searchParams.set('party', p);
-		replaceState(u, page.state);
+	/** ?player=<account> picks that player's charts, ?party=<n> a party. */
+	function partyFromUrl(q: { get(k: string): string | null }): string {
+		const player = q.get('player');
+		return player ? `player:${player}` : (q.get('party') ?? 'squad');
 	}
 
-	const backHref = $derived(fromSession && data?.fight.session_id ? `/sessions/${data.fight.session_id}` : '/');
+	/** Put the current party / player in a URL (?party=2, ?player=<account>). */
+	function withParty(u: URL): URL {
+		u.searchParams.delete('party');
+		u.searchParams.delete('player');
+		if (party.startsWith('player:')) u.searchParams.set('player', party.slice(7));
+		else if (party !== 'squad') u.searchParams.set('party', party);
+		return u;
+	}
+
+	/** Pick the timeline party or player and keep it in the URL, like the tab. */
+	function setParty(p: string) {
+		party = p;
+		replaceState(withParty(addressUrl()), page.state);
+	}
+
+	/** A player's name in a stat table: their boons over time. One URL write: replaceState is
+	 * async, so a second write right after the first would start from the old address. */
+	async function showPlayer(r: Row) {
+		party = `player:${seriesKey(r)}`;
+		setTab('boons');
+		await tick();
+		document.getElementById('boons-over-time')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+	}
+
+	// Back to the session as it was left (tab, picked player), when there is one to go back to.
+	const backHref = $derived(fromSession && data?.fight.session_id ? sessionBackHref(data.fight.session_id) : '/');
 
 	const s = $derived(data?.fight.summary ?? data?.stats?.summary ?? null);
 	const stats = $derived(data?.stats ?? null);
 	const partyIds = $derived(Object.keys(stats?.timeline.parties ?? {}).sort((a, b) => Number(a) - Number(b)));
-	// A ?party= this fight doesn't have falls back to the squad; the Boons tab chart has no
-	// "all parties" view.
-	const debriefParty = $derived(party === 'all' || partyIds.includes(party) ? party : 'squad');
+	// Players to pick for their own charts: by party, then name.
+	const pickPlayers = $derived(
+		[...(stats?.players ?? [])].sort((a, b) => a.group - b.group || String(a.name).localeCompare(String(b.name)))
+	);
+	// A ?party= / ?player= this fight doesn't have falls back to the squad; an account (from a
+	// session link) picks that player's main row. The Boons tab chart has no "all parties" view.
+	const pickedPlayer = $derived(party.startsWith('player:') ? findSeriesRow(pickPlayers, party.slice(7)) : null);
+	const debriefParty = $derived(
+		party === 'all' || partyIds.includes(party) ? party : pickedPlayer ? `player:${seriesKey(pickedPlayer)}` : 'squad'
+	);
 	const boonParty = $derived(debriefParty === 'all' ? 'squad' : debriefParty);
+	const playerAcc = $derived(pickedPlayer ? seriesKey(pickedPlayer) : null);
+
+	// The picked player's own series, fetched one player at a time (and again after a re-analysis).
+	let playerSeries = $state<PlayerSeries | null>(null);
+	let playerError = $state<string | null>(null);
+	$effect(() => {
+		const acc = playerAcc;
+		const fid = id;
+		void data?.stats;
+		playerSeries = null;
+		playerError = null;
+		if (!acc) return;
+		let stale = false;
+		api.playerTimeline(fid, acc)
+			.then((r) => !stale && (playerSeries = r))
+			.catch((e) => !stale && (playerError = e instanceof Error ? e.message : String(e)));
+		return () => {
+			stale = true;
+		};
+	});
 	// Player name -> profession, for the chart tooltips' death lines.
 	const professions = $derived(
 		Object.fromEntries((stats?.players ?? []).map((r) => [r.name as string, r.profession as string]))
@@ -407,12 +463,31 @@
 									<option value={g}>Party {g}</option>
 								{/each}
 								<option value="all">All parties: stability</option>
+								<optgroup label="Players">
+									{#each pickPlayers as r}
+										<option value="player:{seriesKey(r)}">{r.name} · Party {r.group}{r.in_fight === false ? ' (not in fight)' : ''}</option>
+									{/each}
+								</optgroup>
 							</select>
 						</label>
 						<button class="text-xs text-accent hover:underline" onclick={openBoons}>All boons →</button>
 					</div>
-					<FightTimeline timeline={stats.timeline} {highlight} party={debriefParty} {professions} />
-					<p class="mt-1 text-xs text-faint">Hover a ▲ down or ✕ death marker to see who.</p>
+					{#if playerAcc}
+						{#if playerSeries}
+							<PlayerTimelineChart series={playerSeries} timeline={stats.timeline} {highlight} />
+							<p class="mt-1 text-xs text-faint">
+								{pickedPlayer?.name}: health, boons and conditions; damage dealt and taken and healing + barrier per second;
+								distance to the tag and to the squad's center. Orange shading: downed; red: dead.
+							</p>
+						{:else if playerError}
+							<p class="py-6 text-sm text-muted">{playerError}</p>
+						{:else}
+							<div class="h-[460px] animate-pulse rounded bg-panel-2/40"></div>
+						{/if}
+					{:else}
+						<FightTimeline timeline={stats.timeline} {highlight} party={debriefParty} {professions} />
+						<p class="mt-1 text-xs text-faint">Hover a ▲ down or ✕ death marker to see who.</p>
+					{/if}
 				</div>
 
 				<div class="grid gap-5 lg:grid-cols-3">
@@ -508,9 +583,32 @@
 										onclick={() => setParty(g)}>{g === 'squad' ? 'Squad' : `Party ${g}`}</button
 									>
 								{/each}
+								<select
+									class="rounded-md border-0 bg-transparent px-2 py-1 text-xs {playerAcc ? 'bg-raised text-text' : 'text-muted hover:text-text'}"
+									value={playerAcc ? boonParty : ''}
+									onchange={(e) => setParty(e.currentTarget.value || 'squad')}
+									aria-label="One player's boons"
+								>
+									<option value="">Player…</option>
+									{#each pickPlayers as r}
+										<option value="player:{seriesKey(r)}">{r.name} · Party {r.group}</option>
+									{/each}
+								</select>
 							</div>
 						</div>
-						{#if stats.timeline.boons}
+						{#if playerAcc}
+							{#if playerSeries}
+								<PlayerBoonChart series={playerSeries} timeline={stats.timeline} />
+								<p class="mt-1 text-xs text-faint">
+									{pickedPlayer?.name}'s boons: each lane is filled while they had the boon; might and stability are darker
+									with more stacks (hover for the count). The last two lanes show when they were downed or dead.
+								</p>
+							{:else if playerError}
+								<p class="py-6 text-sm text-muted">{playerError}</p>
+							{:else}
+								<div class="h-[400px] animate-pulse rounded bg-panel-2/40"></div>
+							{/if}
+						{:else if stats.timeline.boons}
 							<BoonTimeline timeline={stats.timeline} party={boonParty} {professions} />
 							<p class="mt-1 text-xs text-faint">
 								% of the {boonParty === 'squad' ? "squad's" : "party's"} players (up, not downed or dead) who had the
@@ -550,16 +648,16 @@
 				</div>
 
 				{#if tab === 'overview'}
-					<StatTable columns={overviewCols} players={stats.players} parties={stats.parties} squad={stats.squad} {mode} {hideAbsent} focus={focusStat} />
+					<StatTable columns={overviewCols} players={stats.players} parties={stats.parties} squad={stats.squad} {mode} {hideAbsent} focus={focusStat} onrow={showPlayer} rowTitle="Show this player's boons over time" />
 				{:else if tab === 'boons'}
-					<StatTable columns={cols('boons', boonGroup)} players={stats.players} parties={stats.parties} squad={stats.squad} {mode} {hideAbsent} focus={focusStat} />
+					<StatTable columns={cols('boons', boonGroup)} players={stats.players} parties={stats.parties} squad={stats.squad} {mode} {hideAbsent} focus={focusStat} onrow={showPlayer} rowTitle="Show this player's boons over time" />
 					<p class="mt-2 text-xs text-faint">
 						Uptime: % of time the player had the boon (stability and might also as average stacks). Generation:
 						what this player gave each target in the group - % of time, and for stability/might also the average
 						stacks. Party and squad rows add up their members.
 					</p>
 				{:else if tab === 'positioning'}
-					<StatTable columns={[...cols('positioning'), overviewCols.find((c) => c.key === 'fight_dist_tag')!]} players={stats.players} parties={stats.parties} squad={stats.squad} {mode} {hideAbsent} focus={focusStat} />
+					<StatTable columns={[...cols('positioning'), overviewCols.find((c) => c.key === 'fight_dist_tag')!]} players={stats.players} parties={stats.parties} squad={stats.squad} {mode} {hideAbsent} focus={focusStat} onrow={showPlayer} rowTitle="Show this player's boons over time" />
 					<h2 class="section-title mt-6 mb-2">Downs during the fight</h2>
 					<div class="card overflow-auto">
 						<table class="w-full text-sm">
@@ -596,7 +694,7 @@
 						</table>
 					</div>
 				{:else}
-					<StatTable columns={cols(tab)} players={stats.players} parties={stats.parties} squad={stats.squad} {mode} {hideAbsent} focus={focusStat} />
+					<StatTable columns={cols(tab)} players={stats.players} parties={stats.parties} squad={stats.squad} {mode} {hideAbsent} focus={focusStat} onrow={showPlayer} rowTitle="Show this player's boons over time" />
 				{/if}
 			{/if}
 		{/if}

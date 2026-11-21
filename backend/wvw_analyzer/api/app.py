@@ -262,9 +262,23 @@ def create_app(state: AppState) -> FastAPI:
         a = state.db.analysis(fight_id) or {}
         debrief, unverified = split_debrief(a.get("debrief"))
         notes = registry.add_focus(a.get("notes"))
-        return {"fight": f, "stats": a.get("stats"), "notes": notes,
+        stats = a.get("stats")
+        if stats and stats.get("timeline"):
+            # Every player's own series is large; the page asks for one player at a time.
+            stats["timeline"].pop("players", None)
+        return {"fight": f, "stats": stats, "notes": notes,
                 "debrief": debrief, "debriefUnverified": unverified,
                 "debriefAt": a.get("debriefAt")}
+
+    @app.get("/api/fights/{fight_id}/players/{key}/timeline")
+    def player_timeline(fight_id: int, key: str) -> dict[str, Any]:
+        """One squad row's own series, by its `series_key` (see `timeline.series_keys`)."""
+        a = state.db.analysis(fight_id) or {}
+        tl = (a.get("stats") or {}).get("timeline") or {}
+        series = (tl.get("players") or {}).get(key)
+        if not series:
+            raise HTTPException(404, "No timeline for this player (re-analyze the fight)")
+        return {"t": tl.get("t", []), **series}
 
     @app.post("/api/fights/{fight_id}/reanalyze")
     def reanalyze(fight_id: int, reparse: bool = False) -> dict[str, bool]:

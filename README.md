@@ -10,16 +10,28 @@ A local desktop app for Guild Wars 2 **WvW (zerg) fights**. It turns arcdps logs
 - **Standard log stats.** Boon uptime and generation, damage, down contribution, damage to downed
   enemies, strips, cleanses, healing, defense and positioning. Each is shown per player, per party
   and for the squad.
-- **Boons over time, per party.** The Boons tab charts every boon second by second for the squad
-  or one party (share of its players who had it, plus might and stability stacks), with that
-  party's downs and deaths. On the Debrief tab the fight timeline can show one party instead
-  of the squad, or every party's stability. Hover a down or death marker on either chart to see
-  who it was (profession, party, whether they got up, stability before the down, distance to
-  the tag).
-- **Sessions.** One per raid night, with aggregated stats, leaderboards, recurring problems and
-  strengths. Click a problem or strength to see the fights behind it, each with its numbers;
-  a fight opens its debrief at that note. **See stats** on a note opens the stat table behind
-  it, sorted by that column (for example strips for "Won the strip war").
+- **Boons over time, per party or player.** The Boons tab charts every boon second by second for
+  the squad or one party (share of its players who had it, plus might and stability stacks), with
+  that party's downs and deaths. Pick a **player** to see their own boons as lanes, filled while
+  they had each boon (might and stability darker with more stacks), and when they were downed or
+  dead. On the Debrief tab the fight timeline can show one party, every party's stability, or
+  one player (health, boons and conditions, damage dealt and taken, healing, distance to the tag
+  and to the squad). Click a name in any stat table to open that player's boons. Hover a down or
+  death marker to see who it was (profession, party, whether they got up, stability before the
+  down, distance to the tag).
+- **Sessions.** One per raid night, with recurring problems, strengths and leaderboards. Click a
+  problem or strength to see the fights behind it, each with its numbers; a fight opens its
+  debrief at that note. **See stats** on a note opens the stat table behind it, sorted by that
+  column (for example strips for "Won the strip war").
+  - **Session stats.** The same tabs as a fight (Overview, Boons, Offense, Support, Defense,
+    Positioning) for the whole session, per player, per party and for the squad. Counts and
+    amounts are totals (or **per minute** in fights); uptime, generation, stacks and distances
+    are averages weighted by time in each fight; DPS is damage / time in fights. **Min. time in
+    fights** hides players who were only there briefly.
+  - **Session trend.** One stat fight by fight (stability uptime and given, strips, cleanses,
+    boons lost, damage, downs, deaths, distance to tag) for the squad, a party or a player, with
+    the squad's average player as a reference line. Click a fight to open it (for a player: at
+    their boons). Click a name in a session stat table to see that player's trend.
 - **An in-game overlay (optional).** A small window inside Guild Wars 2 with the latest fight's
   notes and the session summary, so you don't have to alt-tab. It's a Raidcore Nexus addon,
   installed from Settings.

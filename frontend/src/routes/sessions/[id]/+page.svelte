@@ -1,12 +1,15 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { goto } from '$app/navigation';
-	import { onMount } from 'svelte';
-	import { api, type Column, type Occurrence, type SessionDetail } from '#lib/api.ts';
+	import { goto, replaceState } from '$app/navigation';
+	import { onMount, tick, untrack } from 'svelte';
+	import { api, type Column, type Occurrence, type Row, type SessionDetail } from '#lib/api.ts';
 	import { live, toasts } from '#lib/live.svelte.ts';
 	import { compact, dateLabel, duration, fmtValue, profColor, timeOfDay } from '#lib/format.ts';
 	import FightList from '#lib/components/FightList.svelte';
 	import StatTable from '#lib/components/StatTable.svelte';
+	import SessionTrend from '#lib/components/SessionTrend.svelte';
+	import { DEFAULT_STAT, parseSessionView, rememberSession, sessionSearch } from '#lib/sessionNav.ts';
+	import { statTableNote } from '#lib/sessionNotes.ts';
 	import Badge, { severityBar } from '#lib/components/Badges.svelte';
 	import Icon from '#lib/components/Icon.svelte';
 
@@ -15,8 +18,28 @@
 	let loading = $state(true);
 	let editing = $state(false);
 	let name = $state('');
-	let tab = $state<'summary' | 'players' | 'fights'>('summary');
+	let tab = $state('summary');
 	let open = $state<string | null>(null); // expanded strength / problem row
+	// Stat tabs: like the fight page, plus per-minute values and a minimum time in fights.
+	let mode = $state<'player' | 'party'>('player');
+	let boonGroup = $state('Uptime');
+	let perMin = $state(false);
+	let minMinutes = $state(0);
+	// Session trend: which stat, and for whom ('squad', 'party:<n>' or 'player:<account>').
+	let trendKey = $state(DEFAULT_STAT);
+	let trendWho = $state('squad');
+
+	const tabs = [
+		{ id: 'summary', label: 'Summary' },
+		{ id: 'overview', label: 'Overview' },
+		{ id: 'boons', label: 'Boons' },
+		{ id: 'offense', label: 'Offense' },
+		{ id: 'support', label: 'Support' },
+		{ id: 'defense', label: 'Defense' },
+		{ id: 'positioning', label: 'Positioning' },
+		{ id: 'fights', label: 'Fights' }
+	];
+	const boonGroups = ['Uptime', 'Self generation', 'Group generation', 'Off-group generation', 'Squad generation'];
 
 	const toggle = (k: string) => (open = open === k ? null : k);
 
@@ -34,8 +57,51 @@
 	$effect(() => {
 		void id;
 		loading = true;
+		// Deep links: ?tab=<tab>, ?player=<account> and ?stat=<key> (the Summary's trend).
+		// Read from the address bar, not `page.url`: after browser Back to this page, `page.url`
+		// still holds the URL it was first opened with, not the one `syncUrl` wrote since.
+		untrack(() => {
+			const here = new URL(window.location.href);
+			const v = parseSessionView(here.searchParams, tabs.map((x) => x.id), Object.keys(TREND_LABELS));
+			tab = v.tab;
+			trendWho = v.player ? `player:${v.player}` : 'squad';
+			trendKey = v.stat;
+			rememberSession(id, here.pathname + here.search);
+		});
 		load();
 	});
+
+	/** The URL in the address bar (shallow routing doesn't update `page.url`). */
+	function syncUrl() {
+		const u = new URL(window.location.href);
+		const player = trendWho.startsWith('player:') ? trendWho.slice(7) : null;
+		u.search = sessionSearch(u.searchParams, { tab, player, stat: trendKey }).toString();
+		replaceState(u, page.state);
+		rememberSession(id, u.pathname + u.search);
+	}
+
+	function setTab(t: string) {
+		tab = t;
+		syncUrl();
+	}
+
+	function setTrendWho(w: string) {
+		trendWho = w;
+		syncUrl();
+	}
+
+	function setTrendKey(k: string) {
+		trendKey = k;
+		syncUrl();
+	}
+
+	/** A player's name in a stat table: their trend on the Summary tab. */
+	async function showPlayer(r: Row) {
+		trendWho = `player:${r.account}`;
+		setTab('summary');
+		await tick();
+		document.getElementById('session-trend')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+	}
 
 	onMount(() => {
 		let t: ReturnType<typeof setTimeout> | null = null;
@@ -83,12 +149,86 @@
 
 	const agg = $derived(data?.aggregate);
 	const totals = $derived(agg?.totals ?? {});
-	const playerCols = $derived(
-		['damage', 'down_contribution', 'against_downed', 'strips', 'cleanses', 'healing', 'barrier', 'gen_squadBuffs_1122', 'resurrects', 'downs', 'deaths', 'up_1122']
-			.map((k) => agg?.columns.find((c) => c.key === k))
-			.filter(Boolean) as Column[]
-	);
 	const boardFmt = (key: string) => agg?.columns.find((c) => c.key === key)?.fmt ?? 'num';
+
+	// The fight page's "Dist. to tag (fight)" column (a per-fight value, not an EI column).
+	const fightDistTag: Column = {
+		key: 'fight_dist_tag', label: 'Dist. to tag (fight)', tab: 'positioning', agg: 'mean', fmt: 'dist',
+		higherIsBetter: false, group: null, session: 'time',
+		description: 'Median distance to the tag while up during each fight, weighted by time in the fight.'
+	};
+	const colsOf = (tabName: string, group?: string) =>
+		(agg?.columns ?? []).filter((c) => c.tab === tabName && (group === undefined || c.group === group));
+	const tabCols = $derived.by((): Column[] => {
+		if (!agg) return [];
+		if (tab === 'overview') {
+			return ['active_s', 'damage', 'down_contribution', 'strips', 'cleanses', 'healing', 'up_1122', 'up_26980', 'downs', 'deaths', 'fight_dist_tag']
+				.map((k) => (k === 'fight_dist_tag' ? fightDistTag : agg.columns.find((c) => c.key === k)))
+				.filter(Boolean) as Column[];
+		}
+		if (tab === 'boons') return colsOf('boons', boonGroup);
+		if (tab === 'positioning') return [...colsOf('positioning'), fightDistTag];
+		return colsOf(tab);
+	});
+	// Per minute: counts and amounts divided by time in fights; rates (uptime, generation,
+	// distances) stay as they are. Time in fights stays a total.
+	const perMinCol = (c: Column) => perMin && c.session === 'sum' && c.key !== 'active_s';
+	const shownCols = $derived(tabCols.map((c) => (perMinCol(c) ? { ...c, label: `${c.label}/min` } : c)));
+	function view(r: Row): Row {
+		if (!perMin || !r.perMin) return r;
+		const { active_s: _, ...rates } = r.perMin;
+		return { ...r, ...rates };
+	}
+	const tablePlayers = $derived((agg?.players ?? []).filter((r) => r.activeS >= minMinutes * 60).map(view));
+	const tableParties = $derived((agg?.parties ?? []).map(view));
+	const tableSquad = $derived(agg?.squad ? view(agg.squad) : null);
+	const hiddenPlayers = $derived((agg?.players.length ?? 0) - tablePlayers.length);
+
+	// Session trend.
+	const TREND_LABELS: Record<string, string> = {
+		up_1122: 'Stability uptime',
+		gen_squadBuffs_1122: 'Stability given (squad)',
+		strips: 'Strips',
+		cleanses: 'Cleanses',
+		incoming_strips: 'Boons lost',
+		damage: 'Damage',
+		downs: 'Downs',
+		deaths: 'Deaths',
+		fight_dist_tag: 'Dist. to tag'
+	};
+	const trendKeys = $derived(agg?.trend?.keys ?? []);
+	const partyIds = $derived(Object.keys(agg?.trend?.parties ?? {}).sort((a, b) => Number(a) - Number(b)));
+	const trendPlayers = $derived([...(agg?.players ?? [])].sort((a, b) => String(a.name).localeCompare(String(b.name))));
+	// A ?player= that isn't in this session falls back to the squad.
+	const who = $derived.by(() => {
+		const tr = agg?.trend;
+		if (tr && trendWho.startsWith('party:') && tr.parties[trendWho.slice(6)]) return trendWho;
+		if (tr && trendWho.startsWith('player:') && tr.players[trendWho.slice(7)]) return trendWho;
+		return 'squad';
+	});
+	const trendSource = $derived.by(() => {
+		const tr = agg?.trend;
+		if (!tr) return null;
+		return who.startsWith('party:') ? tr.parties[who.slice(6)] : who.startsWith('player:') ? tr.players[who.slice(7)] : tr.squad;
+	});
+	const trendValues = $derived(trendSource?.[trendKey] ?? []);
+	// In each fight or not: damage always has a value when they were in it.
+	const trendPresent = $derived((trendSource?.damage ?? []).map((v) => v != null));
+	const trendMissing = $derived(trendKey === 'fight_dist_tag' ? 'no distance (the commander, or no tag)' : 'no value');
+	const trendPlayer = $derived(who.startsWith('player:') ? agg?.players.find((r) => r.account === who.slice(7)) : null);
+	const trendLabel = $derived(
+		`${who === 'squad' ? 'Squad' : who.startsWith('party:') ? `Party ${who.slice(6)}` : (trendPlayer?.name ?? '')}: ${TREND_LABELS[trendKey] ?? trendKey}`
+	);
+	const trendFmt = $derived(trendKey === 'fight_dist_tag' ? 'dist' : (agg?.columns.find((c) => c.key === trendKey)?.fmt ?? 'num'));
+
+	function openFight(fightId: number) {
+		const q = new URLSearchParams({ from: 'session' });
+		if (who.startsWith('player:')) {
+			q.set('tab', 'boons');
+			q.set('player', who.slice(7));
+		}
+		goto(`/fights/${fightId}?${q}`);
+	}
 </script>
 
 {#snippet occurrences(list: Occurrence[] | undefined)}
@@ -186,11 +326,11 @@
 			</div>
 		</div>
 
-		<div class="mb-4 flex gap-1 border-b border-line">
-			{#each [['summary', 'Summary'], ['players', 'Players'], ['fights', 'Fights']] as [k, label]}
+		<div class="mb-4 flex flex-wrap gap-1 border-b border-line">
+			{#each tabs as t}
 				<button
-					class="-mb-px border-b-2 px-3.5 py-2 text-sm {tab === k ? 'border-accent font-medium text-text' : 'border-transparent text-muted hover:text-text'}"
-					onclick={() => (tab = k as typeof tab)}>{label}</button
+					class="-mb-px border-b-2 px-3.5 py-2 text-sm {tab === t.id ? 'border-accent font-medium text-text' : 'border-transparent text-muted hover:text-text'}"
+					onclick={() => setTab(t.id)}>{t.label}</button
 				>
 			{/each}
 		</div>
@@ -253,7 +393,7 @@
 									<div class="mb-2 flex items-center gap-2">
 										<Icon name="trophy" class="size-4 text-even" />
 										<h3 class="text-sm font-semibold">{board.label}</h3>
-										<span class="ml-auto text-[11px] text-faint">total · per fight</span>
+										<span class="ml-auto text-[11px] text-faint" title={board.rate ? `Weighted by time in each fight; only players in at least a quarter of the session's fight time` : ''}>{board.rate ? 'time-weighted' : 'total · per fight'}</span>
 									</div>
 									<ol class="space-y-1.5">
 										{#each board.rows.slice(0, 5) as r, i}
@@ -262,7 +402,9 @@
 												<span class="size-2 shrink-0 rounded-full" style="background:{profColor(r.profession.split(', ')[0])}"></span>
 												<span class="min-w-0 flex-1 truncate" title={r.account}>{r.name}</span>
 												<span class="tabular font-medium">{fmtValue(r.total, boardFmt(key))}</span>
-												<span class="tabular w-14 text-right text-xs text-faint">{fmtValue(r.perFight, boardFmt(key))}</span>
+												{#if r.perFight != null}
+													<span class="tabular w-14 text-right text-xs text-faint">{fmtValue(r.perFight, boardFmt(key))}</span>
+												{/if}
 											</li>
 										{/each}
 									</ol>
@@ -272,11 +414,96 @@
 					</div>
 				</div>
 			</div>
-		{:else if tab === 'players'}
-			<StatTable columns={playerCols} players={agg.players} extraLead={{ key: 'fights', label: 'Fights' }} hideAbsent={false} />
-			<p class="mt-2 text-xs text-faint">Summed over the session's fights (uptime averaged). One row per account.</p>
-		{:else}
+			<div class="card mt-5 scroll-mt-4 p-4" id="session-trend">
+				<div class="mb-1 flex flex-wrap items-center gap-3">
+					<h2 class="section-title">Session trend</h2>
+					<div class="ml-auto flex flex-wrap items-center gap-2">
+						<select class="input py-1 text-xs" value={trendKey} onchange={(e) => setTrendKey(e.currentTarget.value)} aria-label="Stat">
+							{#each trendKeys as k}<option value={k}>{TREND_LABELS[k] ?? k}</option>{/each}
+						</select>
+						<select class="input py-1 text-xs" value={who} onchange={(e) => setTrendWho(e.currentTarget.value)} aria-label="Squad, party or player">
+							<option value="squad">Squad</option>
+							{#if partyIds.length}
+								<optgroup label="Parties">
+									{#each partyIds as g}<option value="party:{g}">Party {g}</option>{/each}
+								</optgroup>
+							{/if}
+							<optgroup label="Players">
+								{#each trendPlayers as r}<option value="player:{r.account}">{r.name} ({r.fights})</option>{/each}
+							</optgroup>
+						</select>
+					</div>
+				</div>
+				<SessionTrend
+					fights={agg.fights}
+					values={trendValues}
+					reference={who.startsWith('player:') ? (agg.trend.playerAvg[trendKey] ?? null) : null}
+					referenceLabel="Average player"
+					label={trendLabel}
+					fmt={trendFmt}
+					present={trendPresent}
+					missingLabel={trendMissing}
+					onfight={openFight}
+				/>
+				<p class="mt-1 text-xs text-faint">
+					One point per fight, coloured by result; gaps are fights {who.startsWith('player:') ? 'this player was not in' : 'without them'}{trendKey === 'fight_dist_tag' ? ', or without a distance to tag (the commander, or a fight without a tag)' : ''}.
+					{#if who.startsWith('player:')}The dashed line is the squad's average player.{/if}
+					Click a fight to open it{who.startsWith('player:') ? ' at this player\'s boons' : ''}. Pick a player here or click a name in a stat table.
+				</p>
+			</div>
+		{:else if tab === 'fights'}
 			<FightList fights={data.fights} showDate={false} />
+		{:else}
+			<div class="mb-3 flex flex-wrap items-center gap-3">
+				{#if tab === 'boons'}
+					<div class="flex flex-wrap rounded-lg border border-line-2 p-0.5">
+						{#each boonGroups as g}
+							<button
+								class="rounded-md px-2.5 py-1 text-xs {boonGroup === g ? 'bg-raised text-text' : 'text-muted hover:text-text'}"
+								onclick={() => (boonGroup = g)}>{g}</button
+							>
+						{/each}
+					</div>
+				{/if}
+				<div class="ml-auto flex flex-wrap items-center gap-3">
+					<label class="flex items-center gap-2 text-xs text-muted" title="Hide players who spent less time in this session's fights">
+						Min. time in fights
+						<select class="input py-1 text-xs" bind:value={minMinutes}>
+							{#each [0, 5, 15, 30] as m}<option value={m}>{m ? `${m} min` : 'Any'}</option>{/each}
+						</select>
+					</label>
+					<div class="flex rounded-lg border border-line-2 p-0.5" title="Counts and amounts per minute in fights (uptime and other rates are unchanged)">
+						{#each [[false, 'Total'], [true, 'Per minute']] as [v, label]}
+							<button
+								class="rounded-md px-2.5 py-1 text-xs {perMin === v ? 'bg-raised text-text' : 'text-muted hover:text-text'}"
+								onclick={() => (perMin = v as boolean)}>{label}</button
+							>
+						{/each}
+					</div>
+					<div class="flex rounded-lg border border-line-2 p-0.5">
+						{#each ['player', 'party'] as m}
+							<button
+								class="rounded-md px-2.5 py-1 text-xs {mode === m ? 'bg-raised text-text' : 'text-muted hover:text-text'}"
+								onclick={() => (mode = m as 'player' | 'party')}>{m === 'player' ? 'Players' : 'Parties'}</button
+							>
+						{/each}
+					</div>
+				</div>
+			</div>
+			<StatTable
+				columns={shownCols}
+				players={tablePlayers}
+				parties={tableParties}
+				squad={tableSquad}
+				{mode}
+				hideAbsent={false}
+				extraLead={{ key: 'fights', label: 'Fights' }}
+				onrow={showPlayer}
+				rowTitle="Show this player's stats fight by fight"
+			/>
+			<p class="mt-2 text-xs text-faint">
+				{statTableNote(mode, perMin, hiddenPlayers)}
+			</p>
 		{/if}
 	{/if}
 </div>

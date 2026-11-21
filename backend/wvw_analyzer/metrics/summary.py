@@ -167,6 +167,7 @@ def compute_metrics(fight: Fight, mode: str = "zerg", gvg: GvgSettings | None = 
     tl = build_timeline(fight, mode, gvg.round_gap_s, gvg.calloff_grace_s)
     for row, pt in zip(players, tl.players, strict=True):
         row["in_fight"] = pt.in_fight
+        row["series_key"] = pt.key  # this row's own series (per-player charts)
         row["near_share"] = round(pt.near_share, 2)
         row["fight_dist_tag"] = None if pt.fight_dist_tag is None else round(pt.fight_dist_tag)
         row["fight_dist_stack"] = (

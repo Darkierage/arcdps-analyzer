@@ -67,7 +67,7 @@ def _done_fights(state: AppState, session_id: int) -> list[dict[str, Any]]:
 def _fight_block(state: AppState, fight_id: int, done: list[dict[str, Any]]) -> dict[str, Any]:
     f = state.db.fight(fight_id) or {}
     s = f.get("summary") or {}
-    a = state.db.analysis(fight_id) or {}
+    a = state.db.analysis_notes(fight_id) or {}
     notes = a.get("notes") or {}
     debrief, unverified = split_debrief(a.get("debrief"))
     ids = [r["id"] for r in done]  # newest first
@@ -93,7 +93,7 @@ def _fight_block(state: AppState, fight_id: int, done: list[dict[str, Any]]) -> 
 
 def _session_block(state: AppState, session_id: int) -> dict[str, Any]:
     sess = state.db.session(session_id) or {}
-    agg = aggregate_session(state.db.session_analyses(session_id))
+    agg = aggregate_session(state.db.session_analyses(session_id, players=False), detail=False)
     t = agg["totals"]
     return {
         "id": session_id,

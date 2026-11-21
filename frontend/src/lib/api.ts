@@ -81,6 +81,9 @@ export interface Column {
 	higherIsBetter: boolean | null;
 	group: string | null;
 	description: string;
+	/** How it combines over a session: counts add up ('sum'), rates are weighted by time in
+	 * each fight ('time'), DPS is total damage / total time ('dps'). */
+	session?: 'sum' | 'time' | 'dps';
 }
 
 export type Row = Record<string, any>;
@@ -120,6 +123,30 @@ export interface Timeline {
 	mode?: FightMode;
 	rounds?: { start: number; calloff: number; end: number }[];
 	enemyDownsLeft?: number[];
+}
+
+/** One squad member's own charts (GET /api/fights/{id}/players/{account}/timeline). */
+export interface PlayerSeries {
+	t: number[];
+	name: string;
+	account: string;
+	profession: string;
+	group: number;
+	inFight: boolean;
+	/** Boon id -> runs in seconds: [start, end], or [start, end, stacks] for might / stability. */
+	boons: Record<string, number[][]>;
+	health: (number | null)[];
+	dmg_out: (number | null)[];
+	dmg_in: (number | null)[];
+	healing: (number | null)[];
+	barrier: (number | null)[];
+	boonCount: (number | null)[];
+	conditions: (number | null)[];
+	dist_tag: (number | null)[] | null;
+	dist_stack: (number | null)[] | null;
+	/** [start, end] in seconds. */
+	downs: [number, number][];
+	deaths: [number, number][];
 }
 
 export interface Stats {
@@ -227,19 +254,37 @@ export interface SessionAggregate {
 		roundLosses?: number | null;
 	}[];
 	totals: Record<string, any>;
+	/** One row per account: counts summed, rates weighted by time in each fight. Each row has
+	 * `fights`, `activeS` (time in fights) and `perMin` (counts per minute in fights). */
 	players: Row[];
+	/** By party number; `members` is its usual size (in-fight players per fight, rounded) and
+	 * `accounts` everyone who played in it over the session (most fights first). */
+	parties: Row[];
+	squad: Row;
+	/** One value per fight (in `fights` order); null where that squad / party / player wasn't
+	 * in the fight. */
+	trend: {
+		keys: string[];
+		squad: Series;
+		/** The average in-fight player per fight (reference line on a player's trend). */
+		playerAvg: Series;
+		parties: Record<string, Series>;
+		players: Record<string, Series>;
+	};
 	columns: Column[];
 	leaderboards: Record<
 		string,
 		{
 			label: string;
+			/** A rate (uptime, generation): `total` is the time-weighted value, no per-fight. */
+			rate?: boolean;
 			rows: {
 				account: string;
 				name: string;
 				profession: string;
 				fights: number;
 				total: number;
-				perFight: number;
+				perFight: number | null;
 			}[];
 		}
 	>;
@@ -418,6 +463,9 @@ export const api = {
 		return request<FightRow[]>('GET', `/api/fights?${q}`);
 	},
 	fight: (id: number) => request<FightDetail>('GET', `/api/fights/${id}`),
+	/** One squad row's own series, by its `series_key` (the account; `account#2`... for split rows). */
+	playerTimeline: (id: number, key: string) =>
+		request<PlayerSeries>('GET', `/api/fights/${id}/players/${encodeURIComponent(key)}/timeline`),
 	reanalyze: (id: number, reparse = false) =>
 		request<{ ok: boolean }>('POST', `/api/fights/${id}/reanalyze?reparse=${reparse}`),
 	setFightMode: (id: number, mode: FightMode) =>

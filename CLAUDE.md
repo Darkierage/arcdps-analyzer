@@ -27,6 +27,7 @@ uv sync                                   # Python deps (uv may live at ~/.local
 uv run pytest                             # all tests; test_corpus runs only if data/dev_corpus exists
 uv run ruff check backend tests scripts   # lint (line length 100)
 cd frontend && npm run check              # svelte-check / TypeScript
+cd frontend && npm test                   # frontend helper tests (Node's test runner)
 cd frontend && npm run build              # the backend serves frontend/build
 uv run wvw-analyzer --no-window           # http://127.0.0.1:8765 (dev data in ./data)
 uv run python scripts/setup_tools.py      # Elite Insights CLI -> ./bin (--llm for llama + model)

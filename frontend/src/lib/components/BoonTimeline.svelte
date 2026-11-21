@@ -7,6 +7,7 @@
 	import { CanvasRenderer } from 'echarts/renderers';
 	import type { Timeline } from '#lib/api.ts';
 	import { duration } from '#lib/format.ts';
+	import { BOON_COLORS as COLORS } from '#lib/boonColors.ts';
 	import { eventsSection, secondsPerPixels, trackPointer } from '#lib/timelineEvents.ts';
 
 	use([LineChart, ScatterChart, GridComponent, TooltipComponent, LegendComponent, MarkAreaComponent, DataZoomComponent, CanvasRenderer]);
@@ -30,22 +31,6 @@
 	let pointerX: () => number | null = () => null;
 
 	const C = { text: '#8a93a8', line: '#222a3d', down: '#f59e42', dead: '#f2555a' };
-	// EI buff id -> line color. Ids without an entry fall back to gray.
-	const COLORS: Record<string, string> = {
-		'1122': '#7c9cff', // Stability
-		'743': '#facc15', // Aegis
-		'717': '#38bdf8', // Protection
-		'873': '#fb923c', // Resolution
-		'26980': '#c084fc', // Resistance
-		'1187': '#f472b6', // Quickness
-		'30328': '#2dd4bf', // Alacrity
-		'740': '#f87171', // Might
-		'725': '#fda4af', // Fury
-		'718': '#4ade80', // Regeneration
-		'726': '#a3e635', // Vigor
-		'719': '#94a3b8', // Swiftness
-		'5974': '#e2e8f0' // Superspeed
-	};
 	// Shown at first; the rest can be switched on in the legend.
 	const DEFAULT_ON = new Set(['Stability', 'Aegis', 'Protection', 'Resistance', 'Quickness', 'Alacrity', 'Might stacks']);
 	const STACKS = { '1122': 'Stability stacks', '740': 'Might stacks' } as Record<string, string>;

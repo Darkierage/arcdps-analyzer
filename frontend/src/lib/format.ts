@@ -103,6 +103,15 @@ const PROF_COLOR: Record<string, string> = {
 	Necromancer: '#52a76f'
 };
 
+/** Color of a spec. A session row lists several ("Firebrand, Willbender", most played first):
+ * the first one gives the color. */
 export function profColor(spec: string | null | undefined): string {
-	return PROF_COLOR[SPEC_TO_PROF[spec ?? ''] ?? ''] ?? '#8b94a8';
+	const main = (spec ?? '').split(', ')[0];
+	return PROF_COLOR[SPEC_TO_PROF[main] ?? ''] ?? '#8b94a8';
+}
+
+/** Text for HTML built by hand (ECharts tooltip formatters write their string as innerHTML):
+ * names come from logs and must not become markup. */
+export function escapeHtml(s: unknown): string {
+	return String(s ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 }

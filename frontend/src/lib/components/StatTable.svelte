@@ -12,6 +12,8 @@
 		hideAbsent = true,
 		extraLead = null,
 		rowHref = null,
+		onrow = null,
+		rowTitle = '',
 		focus = null
 	}: {
 		columns: Column[];
@@ -22,6 +24,9 @@
 		hideAbsent?: boolean;
 		extraLead?: { key: string; label: string } | null;
 		rowHref?: ((r: Row) => string) | null;
+		/** Makes a player's name a button (e.g. open that player's chart). */
+		onrow?: ((r: Row) => void) | null;
+		rowTitle?: string;
 		/** Column to sort by and tint (deep link from a finding's "See stats"). */
 		focus?: { column: string; sort?: 'asc' | 'desc' } | null;
 	} = $props();
@@ -112,7 +117,7 @@
 				<tr class="group hover:bg-panel-2 {r.in_fight === false ? 'opacity-45' : ''}">
 					<td class="sticky left-0 z-[5] border-b border-line/50 bg-panel px-4 py-2 whitespace-nowrap group-hover:bg-panel-2">
 						{#if mode === 'party'}
-							<div class="font-medium">{r.name} <span class="text-xs text-faint">· {r.members}</span></div>
+							<div class="font-medium" title={r.accounts ? `${r.accounts.length} ${r.accounts.length === 1 ? 'player' : 'players'} over the session: ${r.accounts.join(', ')}` : ''}>{r.name} <span class="text-xs text-faint">· {r.members}</span></div>
 							<div class="mt-0.5 flex gap-1">
 								{#each r.professions ?? [] as p}
 									<span class="size-2 rounded-full" style="background:{profColor(p)}" title={p}></span>
@@ -124,7 +129,9 @@
 								<span class="h-6 w-1 rounded-full" style="background:{profColor(r.profession)}"></span>
 								<div class="min-w-0">
 									<div class="flex items-center gap-1.5 font-medium">
-										{#if href}<a {href} class="hover:underline">{r.name}</a>{:else}{r.name}{/if}
+										{#if href}<a {href} class="hover:underline">{r.name}</a>
+										{:else if onrow}<button class="text-left hover:text-accent hover:underline" title={rowTitle} onclick={() => onrow(r)}>{r.name}</button>
+										{:else}{r.name}{/if}
 										{#if r.is_commander}<span class="chip bg-accent/15 px-1 text-[10px] text-accent">TAG</span>{/if}
 									</div>
 									<div class="text-xs text-faint">{r.profession}{r.in_fight === false ? ' · not in fight' : ''}</div>

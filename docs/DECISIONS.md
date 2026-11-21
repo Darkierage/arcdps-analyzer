@@ -573,6 +573,172 @@ down for the night, and the next start shows no banner (plan:
   02:00–02:40 and from 02:46 did not. Not checked: a real shutdown with the app open (needs the
   user).
 
+## Session stats and per-player charts (2026-11-21)
+
+Request: see all the per-fight stats (boons, cleanses, ...) for a whole session, and charts per
+player, not only for the squad and parties (plan:
+[`plans/12-session-stats.md`](plans/12-session-stats.md)).
+
+- **No log combining.** Every analysis already stores its per-player rows (all stat columns,
+  party, `in_fight`, active time, fight distances); session stats are built from those. No Elite
+  Insights re-run.
+- **How values combine** (`Column.session`, also in the column metadata):
+  - `sum`: counts and amounts (damage, strips, cleanses, healing, downs, deaths, res time) and
+    time in fights add up.
+  - `time`: rates and shares (uptime, every generation column, stacks, distances) are averaged,
+    weighted by the player's active time in each fight (fight length when missing). 40% for
+    5 min and 10% for 1 min give 35%.
+  - `dps`: total damage / total time in fights.
+  - **Why:** the old Players tab added up every `agg: "sum"` column, so generation (summed
+    across party members on the fight page) was summed across fights too: three fights at 40%
+    showed 120%, and the "Stability given" leaderboard ranked by it. DPS was summed; uptimes were
+    a plain per-fight mean, so a 20 s skirmish counted as much as a 6 min fight.
+- **Rows.** Players (one per account, only fights they were in, with `fights`, `activeS` and
+  `perMin` for `sum` columns), parties by party number (each fight's party row from its
+  in-fight members, then combined weighted by fight length; `accounts` lists who played in
+  it), and the squad (the same from each fight's squad row). A group row's DPS is the members'
+  DPS added up, so it is time-weighted like a rate.
+  - **Split rows.** EI can split one player into several rows in a fight (e.g. after a spec
+    change). For the session they are one player in one fight: counts add up, rates are weighted
+    by each row's time, and the longest row gives the party.
+  - **Time in fights.** The session tables' time column (EI's "Active time" on the fight page)
+    is `activeS`: EI's active time, or the fight's length when EI has none. DPS, per minute,
+    Min. time and the rate-board rule use the same seconds. (User's call.)
+  - **Party size.** "Party N · 5" is the party's usual size: in-fight players per fight it was
+    in, rounded. The tooltip lists everyone who played in it over the session. (User's call.)
+  - **Distances.** EI gives `distToCom` -1 in fights without a commander (and `stackDist` -1
+    when there is no stack), and the commander's own distance to tag is 0. None of these is a
+    distance: the session leaves them out of its averages (a player never measured shows "–").
+  - **Split rows' time.** Each row of a split player counts with its own active time; only
+    when no row has any does the fight's length count, as for a single row.
+- **Leaderboards** use the combined values. A rate board ("Stability given") only ranks players
+  with at least 25% of the session's fight time, and shows the time-weighted value without a
+  per-fight column.
+- **Session trend.** Per fight, for the squad, each party, each player and the average in-fight
+  player: stability uptime and squad stability given, strips, cleanses, boons lost, damage,
+  downs, deaths, distance to tag. `null` where they weren't in the fight, and for distance to
+  tag also for the commander and in fights without a tag (the tooltip says which). For a player
+  the reference line is the **average player** (a split player counts once), not the squad
+  (squad totals are on another scale).
+- **Session page.** Tabs Summary · Overview · Boons · Offense · Support · Defense · Positioning ·
+  Fights. Stat tabs reuse the fight page's table with Players / Parties, a Total / Per minute
+  toggle (`sum` columns only; time in fights stays a total) and Min. time in fights (Any, 5,
+  15, 30 min). The Summary has the trend chart (stat and Squad / Party / Player pickers; click a
+  fight to open it, for a player at their boons). Clicking a name in a stat table opens that
+  player's trend. `?tab=`, `?player=` and the trend's `?stat=` are kept in the URL (user's
+  call: the other toggles reset), so a fight's "← Session" link, browser Back and a reload
+  return to the same view. The page reads them from the address bar: after Back, SvelteKit's
+  `page.url` still holds the URL the page was first opened with.
+- **Per-player fight charts.** The timeline stores each squad row's own series, by its
+  `series_key` (also on the row): the account for the account's main row (in the fight, then
+  longest active time) and `account#2`... for further rows of a split player, so links that only
+  know the account (the session trend) open the main row:
+  boons as runs (`[start, end]`, might and stability `[start, end, stacks]`, from EI's states at
+  0.1 s), per-second health, damage out / in, healing, barrier, boon and condition counts,
+  distance to tag (none for the commander) and to the squad's center, and downed / dead
+  intervals clamped to the log (EI marks "until the log ends" with an int64 end).
+  `ANALYZER_VERSION` 7.
+  - **Served one player at a time.** The fight API drops `timeline.players`; the page fetches
+    `GET /api/fights/{id}/players/{key}/timeline` when a player is picked. Sending all of
+    them would add a few hundred kB to every fight page.
+  - **Boons tab:** Squad / Party chips plus a **Player…** select; a player gets a lane chart
+    (one lane per boon, Downed and Dead lanes; tooltip lists the boons and stacks at the
+    pointer). **Debrief:** the Show select lists players; a player gets health, boons and
+    conditions, damage / healing and distances, with downed / dead time shaded. Clicking a name
+    in a fight's stat table opens that player's boons. `?player=` is kept in the URL.
+  - **One URL write per action.** SvelteKit 3's `replaceState` is async, so two writes in a row
+    (party, then tab) built the second from the old address and dropped `?player=`; the page
+    now writes the tab and party in one call.
+- **Validated:**
+  - Unit tests with synthetic rows: time-weighted generation, uptime and distances, DPS =
+    damage / time, counts summed, per minute, a player missing a fight, squad and party rows,
+    the rate-board rule, trend gaps and the average player; boon runs (merging, stack changes,
+    a boon held to the end); per-player series from a synthetic fight; the fight API without
+    and the per-player endpoint with the series (404 for an unknown account).
+  - Corpus snapshot before and after on all 142 `data/dev_corpus` fights: identical summaries,
+    notes and stats except the new `timeline.players` and the columns' `session` field. Stored
+    stats (zlib) grow from 3.8 MB to 8.8 MB for the corpus (about 27 kB → 62 kB per fight).
+  - Dev app on a copy of the dev database (24-fight session): session stability uptime 51.8%,
+    between the fights' 21.8% and 69.1%; no player above 15% squad stability generation;
+    per-minute damage matches DPS x 60; five parties with their accounts; trend for the squad, a
+    party and a player, a fight click opening the fight; both per-player fight charts with
+    tooltips, the name click, and the party / player kept across tabs.
+
+### Review fixes (2026-11-21)
+
+Two `/review-changes` runs (light, then full) on the uncommitted feature found 10 distinct
+issues; all are fixed, none left open. The browser check of the split-row fix found one more
+(the account key first went to the first row, which may be the one not in the fight), also fixed.
+
+- **Script in a chart tooltip (security).** ECharts sets a formatter's string as `innerHTML`, and
+  the trend's series name holds a player's name from the log. A crafted log could run script in
+  the app's origin, whose requests pass the localhost Origin check (settings, deletes). The trend
+  tooltip is now built by `trendTooltip.ts`, which escapes names, map and result
+  (`escapeHtml` in `format.ts`, also used by `timelineEvents.ts`).
+- **Split rows.** Per-player series were keyed by account, so only a split player's last row
+  was kept; now one per row (`series_key`, above). The session aggregate counted each split row
+  as a fight and kept only the last row's trend value; now they are merged (above).
+- **Death intervals** carried EI's int64 "until the end" sentinel into the API; now clamped.
+- **Overlay poll cost.** The overlay's 2 s poll ran the full session aggregate (player, party,
+  squad rows, trend) and unpacked each fight's stats blob, now about 2.3x bigger, to read only
+  notes. It now uses `aggregate_session(..., detail=False)` (results, totals, problems,
+  strengths only), `session_analyses(..., players=False)` and `analysis_notes()`.
+- **DB lock.** `save_analysis` serialized and compressed the stats inside the DB lock (55–90 ms
+  for the largest fights); now before taking it.
+- **Profession color.** Session rows list several professions; `profColor` now colors by the
+  first (most played) instead of falling back to gray.
+- **"← Session" link** on a fight page now returns to the session as it was left (tab, player
+  picked in the trend), remembered by `sessionNav.ts`.
+- **Time column and party size:** decided by the user (see Rows above).
+- **Why `ANALYZER_VERSION` 7** (6 was never released): stored v6 per-player series are wrong for
+  split players (only the last row, under the account) and carry the death sentinel.
+- **Validated:**
+  - A regression test per fix: 8 backend tests in `tests/test_session_stats.py` (all failing on
+    the code before the fixes, run against a frozen copy) and 4 frontend tests in
+    `frontend/tests/` (new `npm test`, Node's built-in runner, no new dependency).
+  - Corpus snapshot before (frozen copy of `backend/`) and after, all 142 fights in zerg and GvG
+    mode (186 analyzed results): summaries, notes and stat tables identical apart from the
+    version and the new `series_key`; 5,882 single-row series identical except 110 death ends
+    clamped to the fight end; all 30 split accounts keep their old series as one of their rows,
+    with the account key on the in-fight row.
+  - Dev app on a copy of the dev database: re-analysis to 7, "Time in fights" and party sizes
+    (e.g. Party 2 · 4, "6 players over the session"), no gray bars for multi-profession players,
+    the trend tooltip still renders, the back link keeps the picked player, and on a fight with
+    a split player each row's name opens its own series and the trend's link opens the in-fight
+    row.
+
+### Review fixes, second round (2026-11-21)
+
+A light `/review-changes` run after the first fixes found 6 issues; all are fixed, none left
+open. The browser check of the fixes found one more, also fixed.
+
+- **Session distances** averaged EI's -1 ("no commander") and the commander's 0 into Dist. to
+  tag for players, parties and the squad (-1 for every player in a fight without a tag).
+- **Trend tooltip** said "not in this fight" for a missing distance to tag; it now says "no
+  distance (the commander, or no tag)" when they were in the fight (`present` per fight from the
+  damage series).
+- **Average player** counted a split player once per row; it now uses the merged rows.
+- **Parties footnote** described player rows; the text now comes from `sessionNotes.ts` per
+  mode.
+- **Split rows' time:** a split row with 0 active time weighted its rates by the fight length
+  but added 0 to the time; now each row uses its own active time (above).
+- **Trend stat in the URL** (`?stat=`, user's choice of the options).
+- **Found in the browser check:** after browser Back, the session page restored its view from
+  `page.url` (the URL it was first opened with) instead of the address bar.
+- **Found in the corpus compare:** session party `accounts` with equal counts were ordered by set
+  iteration, so the order changed with Python's hash seed; now row order.
+- **No `ANALYZER_VERSION` bump:** only the session aggregate and the frontend changed; stored
+  analyses are the same.
+- **Validated:**
+  - 4 backend regression tests (all failing on a frozen copy of the code before), including the
+    aggregate run under three hash seeds; 3 frontend tests (tooltip text, footnote, URL state).
+  - Session aggregates for the 3 corpus days before and after: identical apart from Dist. to tag
+    (players, parties, squad), the average-player trend and the account order; the same under two
+    hash seeds.
+  - Dev app on a copy of the dev database: no negative Dist. to tag, "–" for the commander, the
+    commander's trend tooltip, the Parties footnote, the trend stat kept through a fight and back
+    by the in-app link, browser Back and a reload.
+
 ## Open items at the time of writing
 
 - No "Trends across sessions" page (original plan, phase 6).

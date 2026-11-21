@@ -84,6 +84,9 @@ class PlayerTimeline:
     near_share: float = 1.0
     fight_dist_tag: float | None = None  # median distance to tag while up, during engagement
     fight_dist_stack: float | None = None
+    dist_tag: np.ndarray | None = None  # per second, while up (NaN otherwise)
+    dist_stack: np.ndarray | None = None
+    key: str = ""  # this row's key for its own series (see `series_keys`)
 
 
 @dataclass
@@ -98,6 +101,7 @@ class Timeline:
     squad_deaths: list[dict[str, Any]] = field(default_factory=list)
     enemy_downs: list[float] = field(default_factory=list)
     enemy_deaths: list[float] = field(default_factory=list)
+    end_ms: float = 0.0
     commander_pos: np.ndarray | None = None
     engage_start: float = 0.0
     engage_end: float = 0.0
@@ -142,6 +146,9 @@ class Timeline:
             "mode": self.mode,
             "rounds": [r.json() for r in self.rounds],
             "enemyDownsLeft": [round(e["t"], 2) for e in self.enemy_down_events if e["left"]],
+            # Each squad member's own series, by row key (see `series_keys`). Stored with the
+            # fight, but the fight API leaves it out and serves one player at a time.
+            "players": {pt.key: player_series(pt, self.end_ms) for pt in self.players},
         }
 
 
@@ -237,7 +244,9 @@ def build_timeline(fight: Fight, mode: str = "zerg", round_gap_s: float = 25.0,
     times_ms = t * 1000.0
     n = len(t)
     pts = [_player_timeline(p, fight, times_ms, n) for p in fight.squad]
-    tl = Timeline(t=t, players=pts, mode=mode)
+    for pt in pts:
+        pt.key = pt.player.account or pt.player.name  # refined once in_fight is known
+    tl = Timeline(t=t, players=pts, mode=mode, end_ms=float(fight.duration_ms))
     if not pts:
         return tl
 
@@ -271,6 +280,8 @@ def build_timeline(fight: Fight, mode: str = "zerg", round_gap_s: float = 25.0,
     # dealt/took damage. Squad members elsewhere on the map are excluded from fight series.
     e0, e1 = int(tl.engage_start), int(tl.engage_end) + 1
     for i, p in enumerate(pts):
+        p.dist_stack = d_center[i]
+        p.dist_tag = None if d_tag is None or p.player.is_commander else d_tag[i]
         seen = np.isfinite(d_center[i, e0:e1])
         near = (d_center[i, e0:e1] <= NEAR_STACK) & seen
         p.near_share = float(near.sum() / max(seen.sum(), 1))
@@ -284,6 +295,9 @@ def build_timeline(fight: Fight, mode: str = "zerg", round_gap_s: float = 25.0,
                 v = np.nanmedian(d_tag[i, e0:e1][local])
                 p.fight_dist_tag = None if np.isnan(v) else float(v)
             p.fight_dist_stack = float(np.nanmedian(d_center[i, e0:e1][local]))
+
+    for pt, key in zip(pts, series_keys(pts), strict=True):
+        pt.key = key
 
     # Non-squad allies count only if they were around the fight (not elsewhere on the map).
     for ally in fight.allies:
@@ -385,3 +399,83 @@ def _collect_events(fight: Fight, tl: Timeline, center: np.ndarray) -> None:
     tl.enemy_deaths.sort()
     tl.enemy_down_events.sort(key=lambda e: e["t"])
     tl.enemy_death_events.sort(key=lambda e: e["t"])
+
+
+def series_keys(pts: list[PlayerTimeline]) -> list[str]:
+    """A key per squad row for its own series. EI splits a player into several rows in one
+    fight (e.g. after a spec change). The account's main row (in the fight, then the longest
+    active time, then row order) gets the account itself, so links that only know the account
+    (the session trend) open it; the others get `account#2`, `account#3`..."""
+    by_acc: dict[str, list[int]] = {}
+    for i, pt in enumerate(pts):
+        by_acc.setdefault(pt.player.account or pt.player.name, []).append(i)
+    keys = [""] * len(pts)
+    for base, idx in by_acc.items():
+        idx.sort(key=lambda i: (not pts[i].in_fight, -pts[i].player.active_ms, i))
+        for n, i in enumerate(idx, 1):
+            keys[i] = base if n == 1 else f"{base}#{n}"
+    return keys
+
+
+def _clamped(intervals: list[list[float]], end_ms: float) -> list[list[float]]:
+    """[start, end] in seconds within the log. EI marks a state that lasts until the log ends
+    with a huge end time (int64 max ms), which must not reach the API."""
+    out = []
+    for s, e in intervals:
+        a, b = max(float(s), 0.0), min(float(e), end_ms)
+        if b > a:
+            out.append([round(a / 1000.0, 2), round(b / 1000.0, 2)])
+    return out
+
+
+def boon_runs(states: list[list[float]] | None, end_ms: float,
+              stacks: bool = False) -> list[list[float]]:
+    """A boon's EI step function as runs in seconds: [start, end] while the player had it, or
+    [start, end, stacks] while the stack count stayed the same."""
+    st = states or []
+    runs: list[list[float]] = []
+    for i, (t, v) in enumerate(st):
+        nxt = st[i + 1][0] if i + 1 < len(st) else end_ms
+        if v <= 0 or nxt <= t:
+            continue
+        a, b = round(t / 1000.0, 1), round(min(nxt, end_ms) / 1000.0, 1)
+        if b <= a:
+            continue
+        if runs and runs[-1][1] == a and (not stacks or runs[-1][2] == v):
+            runs[-1][1] = b  # continues the previous run
+        else:
+            runs.append([a, b, int(v)] if stacks else [a, b])
+    return runs
+
+
+def player_series(pt: PlayerTimeline, end_ms: float) -> dict[str, Any]:
+    """One squad member's own charts: boons as runs, and per-second health, damage, healing,
+    boon and condition counts and distances. Served one player at a time (it is too much to
+    send for the whole squad with every fight)."""
+    p = pt.player
+
+    def ints(a: np.ndarray | None) -> list[int | None] | None:
+        if a is None:
+            return None
+        return [None if not np.isfinite(x) else int(round(float(x))) for x in a]
+
+    return {
+        "name": p.name,
+        "account": p.account,
+        "profession": p.profession,
+        "group": p.group,
+        "inFight": pt.in_fight,
+        "boons": {str(bid): boon_runs(p.buff_states(bid), end_ms, bid in INTENSITY_BOONS)
+                  for bid in TIMELINE_BOONS},
+        "health": ints(pt.health),
+        "dmg_out": ints(pt.dmg_out),
+        "dmg_in": ints(pt.dmg_in),
+        "healing": ints(pt.healing),
+        "barrier": ints(pt.barrier),
+        "boonCount": ints(pt.boons),
+        "conditions": ints(pt.conditions),
+        "dist_tag": ints(pt.dist_tag),
+        "dist_stack": ints(pt.dist_stack),
+        "downs": _clamped(p.down_intervals, end_ms),
+        "deaths": _clamped(p.dead_intervals, end_ms),
+    }

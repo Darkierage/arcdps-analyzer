@@ -14,6 +14,12 @@ from ..model.fight import BOONS, INTENSITY_BOONS, Player
 
 Agg = Literal["sum", "mean", "max"]
 Fmt = Literal["int", "num", "pct", "stacks", "dist", "sec", "text"]
+# How a player's values combine over a session's fights:
+#   sum  - counts and amounts add up (damage, strips, deaths, time in fights)
+#   time - rates and shares: mean weighted by the player's time in each fight (uptime,
+#          generation, stacks, distances); 40% for 5 min and 10% for 1 min give 35%
+#   dps  - total damage / total time in fights
+SessionAgg = Literal["sum", "time", "dps"]
 
 
 @dataclass(frozen=True)
@@ -27,6 +33,15 @@ class Column:
     higher_is_better: bool | None = True
     group: str | None = None  # sub-heading inside a tab (e.g. "Uptime", "Squad generation")
     description: str = ""
+    session: SessionAgg | None = None  # None: derived from fmt (see `session_agg`)
+
+    @property
+    def session_agg(self) -> SessionAgg:
+        if self.session:
+            return self.session
+        if self.key.startswith("gen_") or self.fmt in ("pct", "stacks", "dist"):
+            return "time"
+        return "sum"
 
     def meta(self) -> dict:
         return {
@@ -38,6 +53,7 @@ class Column:
             "higherIsBetter": self.higher_is_better,
             "group": self.group,
             "description": self.description,
+            "session": self.session_agg,
         }
 
 
@@ -108,7 +124,7 @@ IDENTITY: list[Column] = [
 
 OFFENSE: list[Column] = [
     Column("damage", "Damage", "offense", _f("dpsAll", "damage"), fmt="num"),
-    Column("dps", "DPS", "offense", _f("dpsAll", "dps"), fmt="num"),
+    Column("dps", "DPS", "offense", _f("dpsAll", "dps"), fmt="num", session="dps"),
     Column("power_damage", "Power dmg", "offense", _f("dpsAll", "powerDamage"), fmt="num"),
     Column("condi_damage", "Condi dmg", "offense", _f("dpsAll", "condiDamage"), fmt="num"),
     Column(

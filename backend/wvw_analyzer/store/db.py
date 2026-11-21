@@ -193,6 +193,10 @@ class Database:
 
     def save_analysis(self, fight_id: int, summary: dict[str, Any], stats: dict[str, Any],
                       notes: dict[str, Any]) -> None:
+        # Serialize and compress before taking the lock: a large fight's stats take tens of ms,
+        # and every other DB call (overlay polls, page requests) waits on the lock.
+        packed, notes_json = _pack(stats), _dumps(notes)
+        players_json = _dumps(stats.get("players"))
         with self._lock:
             # A stored debrief was worded from the previous notes and summary: keep it only if
             # the re-analysis produced exactly the same ones.
@@ -213,7 +217,7 @@ class Database:
                 """INSERT INTO analyses(fight_id, stats, notes, players) VALUES (?,?,?,?)
                    ON CONFLICT(fight_id) DO UPDATE SET stats=excluded.stats,
                    notes=excluded.notes, players=excluded.players""",
-                (fight_id, _pack(stats), _dumps(notes), _dumps(stats.get("players"))))
+                (fight_id, packed, notes_json, players_json))
             self._conn.commit()
 
     def set_mode(self, fight_ids: list[int], mode: str) -> None:
@@ -287,15 +291,30 @@ class Database:
             "debriefAt": r["debrief_at"],
         }
 
-    def session_analyses(self, session_id: int) -> list[dict[str, Any]]:
+    def session_analyses(self, session_id: int, players: bool = True) -> list[dict[str, Any]]:
+        """Each analyzed fight's summary and notes, and with `players` its player rows."""
+        cols = "f.id, f.summary, a.notes" + (", a.players" if players else "")
         rows = self._all(
-            """SELECT f.id, f.summary, a.notes, a.players FROM fights f
+            f"""SELECT {cols} FROM fights f
                JOIN analyses a ON a.fight_id = f.id
                WHERE f.session_id=? AND f.status='done' ORDER BY f.fight_start""",
             (session_id,))
-        return [{"id": r["id"], "summary": json.loads(r["summary"]),
-                 "notes": json.loads(r["notes"]), "players": json.loads(r["players"])}
-                for r in rows]
+        out = []
+        for r in rows:
+            item = {"id": r["id"], "summary": json.loads(r["summary"]),
+                    "notes": json.loads(r["notes"])}
+            if players:
+                item["players"] = json.loads(r["players"])
+            out.append(item)
+        return out
+
+    def analysis_notes(self, fight_id: int) -> dict[str, Any] | None:
+        """Notes and debrief without unpacking the stats blob (the overlay's poll)."""
+        r = self._one("SELECT notes, debrief FROM analyses WHERE fight_id=?", (fight_id,))
+        if not r:
+            return None
+        return {"notes": json.loads(r["notes"]) if r["notes"] else None,
+                "debrief": r["debrief"]}
 
     def delete_empty_sessions(self, kind: str) -> None:
         self._exec("""DELETE FROM sessions WHERE kind=? AND ended_at IS NOT NULL AND id NOT IN

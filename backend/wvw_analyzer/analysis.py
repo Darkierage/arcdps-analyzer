@@ -16,7 +16,7 @@ from .notes.templates import render
 
 # Bump when analysis output changes (new columns, detector fixes); stored fights with another
 # version are re-analyzed on startup.
-ANALYZER_VERSION = 5  # 5: per-party boon series in the timeline
+ANALYZER_VERSION = 7  # 7: per-row series keys, clamped down/dead intervals
 
 
 class Skipped(Exception):
