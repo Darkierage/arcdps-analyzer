@@ -50,20 +50,24 @@ def _is_our_app(host: str, port: int) -> bool:
     try:
         with urllib.request.urlopen(f"http://{host}:{port}/api/status", timeout=1.5) as r:
             data = json.loads(r.read())
-        return isinstance(data, dict) and "recording" in data and "version" in data
+        return isinstance(data, dict) and (data.get("app") == "wvw-analyzer" or (
+            "recording" in data and "version" in data))  # before 0.5.0: no "app" field
     except (OSError, ValueError):
         return False
 
 
 def choose_port(host: str, preferred: int, span: int = 20) -> tuple[int, bool]:
-    """(port, already_running): reuse a running instance, or the first free port from preferred."""
-    if _port_free(host, preferred):
-        return preferred, False
-    if _is_our_app(host, preferred):
-        return preferred, True
-    for port in range(preferred + 1, preferred + span + 1):
+    """(port, already_running): reuse a running instance, or the first free port from preferred.
+
+    A running instance may sit on a later port: it took the first free one when its preferred
+    port was busy. So each busy port up to the first free one is checked for it (two instances
+    would share one database and both record). Probing a free port is slow on Windows (a
+    refused connect takes ~2 s), so the walk stops at the first free port."""
+    for port in range(preferred, preferred + span + 1):
         if _port_free(host, port):
             return port, False
+        if _is_our_app(host, port):
+            return port, True
     raise RuntimeError(f"No free port between {preferred} and {preferred + span}")
 
 
@@ -142,6 +146,10 @@ def main(argv: list[str] | None = None) -> None:
         webbrowser.open(url)
         thread.join()
         return
+    # Window closed. Stop llama-server first: a debrief still being written would otherwise
+    # hold up the server's shutdown past the join below, and the process would exit without
+    # the shutdown step, leaving llama-server running.
+    state.llm.shutdown(final=True)
     server.should_exit = True
     thread.join(timeout=10)
 

@@ -41,7 +41,7 @@
 		overlayBusy = true;
 		try {
 			const was = overlay?.installed;
-			overlay = remove ? await api.uninstallOverlayAddon() : await api.installOverlayAddon(s.gw2_dir);
+			overlay = remove ? await api.uninstallOverlayAddon(s.gw2_dir) : await api.installOverlayAddon(s.gw2_dir);
 			s.gw2_dir = overlay.override;
 			toasts.push(remove ? 'In-game overlay removed' : was ? 'In-game overlay updated' : 'In-game overlay installed', 'success');
 		} catch (e) {
@@ -60,7 +60,11 @@
 				const cur = det[d.name];
 				const diff: Record<string, any> = {};
 				if (!cur.enabled) diff.enabled = false;
-				for (const [k, v] of Object.entries(d.defaults)) if (cur[k] !== v) diff[k] = Number(cur[k]);
+				for (const [k, v] of Object.entries(d.defaults)) {
+					// A cleared field (null in Svelte 5) means "use the default", not 0.
+					if (cur[k] === null || cur[k] === undefined || cur[k] === '') continue;
+					if (Number(cur[k]) !== v) diff[k] = Number(cur[k]);
+				}
 				if (Object.keys(diff).length) detectors[d.name] = diff;
 			}
 			const patch: Record<string, any> = { ...s, detectors };
@@ -72,6 +76,7 @@
 			loadedMode = s.fight_mode;
 			dirty = false;
 			await live.refresh();
+			loadOverlay(); // the Guild Wars 2 folder may have changed
 			if (reanalyze) {
 				const r = await api.reanalyzeAll();
 				toasts.push(`Saved - re-analyzing ${r.queued} fights`, 'success');

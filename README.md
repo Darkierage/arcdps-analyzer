@@ -10,6 +10,10 @@ A local desktop app for Guild Wars 2 **WvW (zerg) fights**. It turns arcdps logs
 - **Standard log stats.** Boon uptime and generation, damage, down contribution, damage to downed
   enemies, strips, cleanses, healing, defense and positioning. Each is shown per player, per party
   and for the squad.
+- **Boons over time, per party.** The Boons tab charts every boon second by second for the squad
+  or one party (share of its players who had it, plus might and stability stacks), with that
+  party's downs and deaths. On the Debrief tab the fight timeline can show one party instead
+  of the squad, or every party's stability.
 - **Sessions.** One per raid night, with aggregated stats, leaderboards, recurring problems and
   strengths. Click a problem or strength to see the fights behind it, each with its numbers;
   a fight opens its debrief at that note. **See stats** on a note opens the stat table behind
@@ -75,13 +79,17 @@ strengths) and a **Start / Stop recording** button.
 - **Requirements:** [Raidcore Nexus](https://raidcore.gg/Nexus) (it also loads arcdps), and
   WvW Analyzer 0.5.0 or newer running on the same PC. Players using arcdps without Nexus aren't
   supported yet.
-- **Install:** Settings → *In-game overlay* → **Install**. The Guild Wars 2 folder is found
-  automatically (or enter it). The app copies `WvWAnalyzer.dll` into `<Guild Wars 2>\addons`
+- **Install:** Settings → *In-game overlay* → **Install**, with the game closed. The Guild Wars 2
+  folder is found automatically for the standard and Steam default folders (otherwise enter
+  it). The app copies `WvWAnalyzer.dll` into `<Guild Wars 2>\addons`
   and nothing else. **Remove** deletes that DLL and the addon's settings folder. After an app
   upgrade the addon is updated on the next start while the game is closed, or with **Update**.
 - **In game:** the Quick Access icon or **ALT+SHIFT+W** (rebindable in Nexus) toggles the
   window. Options in Nexus → Addons → WvW Analyzer: open the window when a new fight has been
   analyzed (only once you're out of combat), hide it in combat, background opacity.
+- **Timing:** a fight shows up once the app has analyzed its log, usually within half a minute
+  of the fight ending. The window follows the current session; while you browse older fights,
+  **Latest** goes back to the newest one.
 - **What it does and doesn't do.** It only draws a window through Nexus. Everything in it comes
   from the WvW Analyzer app over `127.0.0.1`, which works from finished arcdps logs like Elite
   Insights does. The only game state it reads is MumbleLink's "in combat" flag (ArenaNet's

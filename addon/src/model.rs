@@ -14,8 +14,44 @@ pub struct Overlay {
     pub version: String,
     pub recording: Recording,
     pub queue: Queue,
+    /// The current session's newest fight, whatever fight is being browsed.
+    pub latest: Option<Latest>,
     pub session: Option<Session>,
     pub fight: Option<Fight>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Latest {
+    pub id: i64,
+    /// When the analyzer picked up the newest log; unchanged by a re-analysis.
+    pub added_at: String,
+}
+
+/// Decides when a newly analyzed fight should open the window: only when `latest.addedAt` moves
+/// past everything seen before. The first payload only sets the baseline (no pop-up for fights
+/// that were there when the game started), and deleting or re-analyzing fights never counts.
+#[derive(Debug, Default)]
+pub struct NewFights {
+    /// None until the first payload; then the newest `addedAt` seen (None: no fights yet).
+    seen: Option<Option<String>>,
+}
+
+impl NewFights {
+    pub fn observe(&mut self, latest: Option<&Latest>) -> bool {
+        let added = latest.map(|l| l.added_at.as_str());
+        match &mut self.seen {
+            None => {
+                self.seen = Some(added.map(str::to_owned));
+                false
+            }
+            Some(max) if added > max.as_deref() => {
+                *max = added.map(str::to_owned);
+                true
+            }
+            Some(_) => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -141,6 +177,32 @@ pub fn severity_label(severity: &str) -> &'static str {
 mod tests {
     use super::*;
 
+    fn latest(id: i64, added_at: &str) -> Latest {
+        Latest { id, added_at: added_at.into() }
+    }
+
+    #[test]
+    fn new_fights_baseline_then_only_newer_fights() {
+        let mut w = NewFights::default();
+        // Fights already there when the addon starts: no pop-up.
+        assert!(!w.observe(Some(&latest(7, "2026-11-21T20:00:00"))));
+        assert!(!w.observe(Some(&latest(7, "2026-11-21T20:00:00"))));
+        assert!(w.observe(Some(&latest(8, "2026-11-21T20:05:00"))));
+        // Newest fight deleted (or re-queued for a re-analysis), then back: not new.
+        assert!(!w.observe(Some(&latest(7, "2026-11-21T20:00:00"))));
+        assert!(!w.observe(None));
+        assert!(!w.observe(Some(&latest(8, "2026-11-21T20:05:00"))));
+        // A new fight may reuse a deleted id; its time still moves forward.
+        assert!(w.observe(Some(&latest(8, "2026-11-21T20:09:00"))));
+    }
+
+    #[test]
+    fn new_fights_first_fight_of_an_empty_session_counts() {
+        let mut w = NewFights::default();
+        assert!(!w.observe(None)); // connected, no fights yet
+        assert!(w.observe(Some(&latest(1, "2026-11-21T20:00:00"))));
+    }
+
     const FIXTURE: &str = include_str!("../tests/fixtures/overlay.json");
 
     #[test]
@@ -150,6 +212,8 @@ mod tests {
         let f = o.fight.expect("fight");
         assert!(f.result_line.starts_with("Result:"));
         assert!(!f.issues.is_empty() && !f.issues[0].title.is_empty());
+        let latest = o.latest.expect("latest");
+        assert!(latest.id == f.id && !latest.added_at.is_empty());
         let s = o.session.expect("session");
         assert_eq!(s.latest_id, Some(f.id));
         assert!(!s.problems.is_empty());

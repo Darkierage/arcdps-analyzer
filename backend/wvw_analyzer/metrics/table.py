@@ -47,6 +47,8 @@ def party_rows(rows: list[Row]) -> list[Row]:
         agg = _aggregate(members, ALL_COLUMNS)
         agg.update(name=f"Party {g}", group=g, profession="", account="")
         agg["professions"] = sorted(r["profession"] for r in members)
+        # Healing is only recorded for players running the arcdps healing addon.
+        agg["has_heal_data"] = any(r.get("has_heal_data") for r in members)
         out.append(agg)
     return out
 

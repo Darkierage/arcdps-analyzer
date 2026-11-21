@@ -65,6 +65,7 @@ class LlmService:
         self.busy = False
         self.setup_state: dict[str, Any] = {"running": False, "error": None, "progress": None}
         self._stop = threading.Event()
+        self._closed = False  # app is exiting: never start llama-server again
         threading.Thread(target=self._idle_loop, name="llm-idle", daemon=True).start()
 
     # ---- status / setup --------------------------------------------------------------------
@@ -126,6 +127,8 @@ class LlmService:
 
     # ---- server lifecycle -----------------------------------------------------------------
     def _start(self) -> None:
+        if self._closed:
+            raise RuntimeError("WvW Analyzer is closing")
         s = self.config.settings.llm
         server = self.server_path()
         model = self.model_file()
@@ -159,7 +162,11 @@ class LlmService:
         self.shutdown()
         raise RuntimeError("llama-server did not become ready in time")
 
-    def shutdown(self) -> None:
+    def shutdown(self, final: bool = False) -> None:
+        """Stop llama-server. ``final`` (app exit) also keeps it from being started again."""
+        if final:
+            self._closed = True
+            self._stop.set()
         if self._proc is not None:
             self._proc.terminate()
             try:

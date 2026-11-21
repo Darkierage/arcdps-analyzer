@@ -64,14 +64,17 @@ def game_running() -> bool | None:
 
 
 def candidate_dirs() -> list[Path]:
+    """A running game first, then the standalone and Steam default install folders."""
     out = _running_gw2_dirs()
     if sys.platform == "win32":
-        for var in ("ProgramFiles", "ProgramFiles(x86)"):
-            if os.environ.get(var):
-                out.append(Path(os.environ[var]) / "Guild Wars 2")
+        roots = [Path(os.environ[v]) for v in ("ProgramFiles", "ProgramFiles(x86)")
+                 if os.environ.get(v)]
     elif paths.is_wsl():
-        out += [Path("/mnt/c/Program Files/Guild Wars 2"),
-                Path("/mnt/c/Program Files (x86)/Guild Wars 2")]
+        roots = [Path("/mnt/c/Program Files"), Path("/mnt/c/Program Files (x86)")]
+    else:
+        roots = []
+    out += [r / "Guild Wars 2" for r in roots]
+    out += [r / "Steam" / "steamapps" / "common" / "Guild Wars 2" for r in roots]
     return out
 
 

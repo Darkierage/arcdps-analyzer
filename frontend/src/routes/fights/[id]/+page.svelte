@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { goto, replaceState } from '$app/navigation';
+	import { goto, pushState, replaceState } from '$app/navigation';
 	import { onMount, tick, untrack } from 'svelte';
 	import { api, type Column, type FightDetail, type FindingFocus } from '#lib/api.ts';
 	import { live, toasts } from '#lib/live.svelte.ts';
@@ -8,6 +8,7 @@
 	import Badge from '#lib/components/Badges.svelte';
 	import FindingCard from '#lib/components/FindingCard.svelte';
 	import FightTimeline from '#lib/components/FightTimeline.svelte';
+	import BoonTimeline from '#lib/components/BoonTimeline.svelte';
 	import StatTable from '#lib/components/StatTable.svelte';
 	import Icon from '#lib/components/Icon.svelte';
 
@@ -16,7 +17,8 @@
 	let loading = $state(true);
 	let tab = $state('debrief');
 	let highlight = $state<[number, number] | null>(null);
-	let partyLines = $state(false);
+	// Timeline party: 'squad', a party's group number, or 'all' (stability per party; Debrief only).
+	let party = $state('squad');
 	let mode = $state<'player' | 'party'>('player');
 	let hideAbsent = $state(true);
 	let boonGroup = $state('Uptime');
@@ -66,6 +68,7 @@
 			const stat = q.get('stat');
 			pendingFinding = q.get('finding');
 			fromSession = q.get('from') === 'session';
+			party = q.get('party') ?? 'squad';
 			focusFinding = null;
 			showMore = false;
 			tab = pendingFinding ? 'debrief' : tabs.some((x) => x.id === t) ? t! : 'debrief';
@@ -89,29 +92,97 @@
 		document.getElementById(`finding-${key}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
 	}
 
-	/** Switch tab (optionally focused on one stat column) and keep the URL in sync. */
-	function setTab(t: string, focus: FindingFocus | null = null) {
+	/** Switch tab (optionally focused on one stat column) and keep the URL in sync. With `push`
+	 * the switch gets its own history entry, so the browser's Back returns to the old tab. */
+	function setTab(t: string, focus: FindingFocus | null = null, push = false) {
 		tab = t;
+		cameFromTimeline = false;
 		focusStat = focus;
 		if (focus && t === 'boons') {
 			const g = stats?.columns.find((c: Column) => c.key === focus.column)?.group;
 			if (g) boonGroup = g;
 		}
-		const u = new URL(page.url.href);
+		const u = addressUrl();
 		for (const k of ['tab', 'stat', 'sort', 'finding']) u.searchParams.delete(k);
 		if (t !== 'debrief') u.searchParams.set('tab', t);
 		if (focus) {
 			u.searchParams.set('stat', focus.column);
 			if (focus.sort === 'asc') u.searchParams.set('sort', 'asc');
 		}
-		replaceState(u, page.state);
+		if (push) pushState(u, page.state);
+		else replaceState(u, page.state);
 		if (focus) window.scrollTo({ top: 0, behavior: 'smooth' });
+	}
+
+	/** The URL in the address bar. pushState/replaceState (shallow routing) don't update
+	 * `page.url`, which keeps the last real navigation's URL. */
+	function addressUrl(): URL {
+		return new URL(window.location.href);
+	}
+
+	// Back/forward between this page's own entries (All boons → pushes one): follow the address
+	// bar's tab and party. A ?finding= link always shows the Debrief.
+	onMount(() => {
+		const follow = () => {
+			cameFromTimeline = false;
+			const q = addressUrl().searchParams;
+			const t = q.get('finding') ? 'debrief' : (q.get('tab') ?? 'debrief');
+			if (tabs.some((x) => x.id === t)) tab = t;
+			party = q.get('party') ?? 'squad';
+		};
+		window.addEventListener('popstate', follow);
+		return () => window.removeEventListener('popstate', follow);
+	});
+
+	/** Debrief timeline -> Boons tab, and back to the timeline where the reader was. */
+	let cameFromTimeline = false; // the history entry before this one is the Debrief timeline
+	async function openBoons() {
+		setTab('boons', null, true);
+		cameFromTimeline = true;
+		await tick();
+		document.getElementById('boons-over-time')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+	}
+	async function backToTimeline() {
+		if (cameFromTimeline) {
+			// Go back through history (no duplicate Debrief entry), keeping the party picked here.
+			const keep = party;
+			const back = new Promise((r) => window.addEventListener('popstate', r, { once: true }));
+			history.back();
+			await back;
+			if (party !== keep) setParty(keep);
+		} else {
+			setTab('debrief');
+		}
+		await tick();
+		document.getElementById('fight-timeline')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+	}
+
+	/** Pick the timeline party and keep it in the URL (?party=2), like the tab. */
+	function setParty(p: string) {
+		party = p;
+		const u = addressUrl();
+		if (p === 'squad') u.searchParams.delete('party');
+		else u.searchParams.set('party', p);
+		replaceState(u, page.state);
 	}
 
 	const backHref = $derived(fromSession && data?.fight.session_id ? `/sessions/${data.fight.session_id}` : '/');
 
 	const s = $derived(data?.fight.summary ?? data?.stats?.summary ?? null);
 	const stats = $derived(data?.stats ?? null);
+	const partyIds = $derived(Object.keys(stats?.timeline.parties ?? {}).sort((a, b) => Number(a) - Number(b)));
+	// A ?party= this fight doesn't have falls back to the squad; the Boons tab chart has no
+	// "all parties" view.
+	const debriefParty = $derived(party === 'all' || partyIds.includes(party) ? party : 'squad');
+	const boonParty = $derived(debriefParty === 'all' ? 'squad' : debriefParty);
+	/** Chip tooltip: the party's players who took part (the ones the chart is about). */
+	function partyTitle(g: string): string {
+		const profs = (stats?.players ?? [])
+			.filter((r) => String(r.group) === g && r.in_fight !== false)
+			.map((r) => r.profession as string)
+			.sort();
+		return profs.length ? `${profs.length} ${profs.length === 1 ? 'player' : 'players'}: ${profs.join(', ')}` : '';
+	}
 	const notes = $derived(data?.notes ?? null);
 	const cols = (tabName: string, group?: string) =>
 		(stats?.columns ?? []).filter((c: Column) => c.tab === tabName && (group === undefined || c.group === group));
@@ -320,14 +391,22 @@
 			</div>
 
 			{#if tab === 'debrief'}
-				<div class="card mb-5 p-4">
+				<div class="card mb-5 scroll-mt-4 p-4" id="fight-timeline">
 					<div class="mb-1 flex items-center gap-3">
 						<h2 class="section-title">Fight timeline</h2>
 						<label class="ml-auto flex items-center gap-2 text-xs text-muted">
-							<input type="checkbox" class="accent-accent" bind:checked={partyLines} /> Stability per party
+							Show
+							<select class="input !w-auto !py-1 text-xs" value={debriefParty} onchange={(e) => setParty(e.currentTarget.value)}>
+								<option value="squad">Squad</option>
+								{#each partyIds as g}
+									<option value={g}>Party {g}</option>
+								{/each}
+								<option value="all">All parties: stability</option>
+							</select>
 						</label>
+						<button class="text-xs text-accent hover:underline" onclick={openBoons}>All boons →</button>
 					</div>
-					<FightTimeline timeline={stats.timeline} {highlight} {partyLines} />
+					<FightTimeline timeline={stats.timeline} {highlight} party={debriefParty} />
 				</div>
 
 				<div class="grid gap-5 lg:grid-cols-3">
@@ -410,6 +489,33 @@
 					</div>
 				</div>
 			{:else}
+				{#if tab === 'boons'}
+					<div class="card mb-5 scroll-mt-4 p-4" id="boons-over-time">
+						<div class="mb-1 flex flex-wrap items-center gap-3">
+							<h2 class="section-title">Boons over time</h2>
+							<button class="text-xs text-accent hover:underline" onclick={backToTimeline}>← Fight timeline</button>
+							<div class="ml-auto flex flex-wrap rounded-lg border border-line-2 p-0.5">
+								{#each ['squad', ...partyIds] as g}
+									<button
+										class="rounded-md px-2.5 py-1 text-xs {boonParty === g ? 'bg-raised text-text' : 'text-muted hover:text-text'}"
+										title={g === 'squad' ? '' : partyTitle(g)}
+										onclick={() => setParty(g)}>{g === 'squad' ? 'Squad' : `Party ${g}`}</button
+									>
+								{/each}
+							</div>
+						</div>
+						{#if stats.timeline.boons}
+							<BoonTimeline timeline={stats.timeline} party={boonParty} />
+							<p class="mt-1 text-xs text-faint">
+								% of the {boonParty === 'squad' ? "squad's" : "party's"} players (up, not downed or dead) who had the
+								boon each second; dashed lines are average stacks (right axis). Click a boon in the legend to show or
+								hide it.
+							</p>
+						{:else}
+							<p class="py-6 text-sm text-muted">Re-analyze this fight to see boons over time.</p>
+						{/if}
+					</div>
+				{/if}
 				<div class="mb-3 flex flex-wrap items-center gap-3">
 					{#if tab === 'boons'}
 						<div class="flex rounded-lg border border-line-2 p-0.5">

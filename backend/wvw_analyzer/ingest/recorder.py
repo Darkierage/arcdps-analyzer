@@ -27,6 +27,9 @@ from .processor import Processor
 log = logging.getLogger(__name__)
 
 LOG_EXTS = (".zevtc", ".evtc", ".evtc.zip")
+MIN_POLL_S = 0.1  # floor for the scan interval (a 0 setting would spin the CPU)
+# After Stop, how much longer than `stable_s` to wait for a log that is still being written.
+DRAIN_EXTRA_S = 10.0
 GW2_PROCESS = "gw2-64.exe"
 
 
@@ -70,9 +73,10 @@ class Recorder:
         self.started_at: float | None = None
         self.fights_queued = 0
         self.auto_started = False
-        self._stop = threading.Event()
+        self._stop = threading.Event()  # replaced per recording (see start)
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
+        self._import_lock = threading.Lock()  # uploads import in parallel
         self._watch: threading.Thread | None = None
         self._index: tuple[float, dict[str, tuple[Path, int]]] | None = None
         self._game_running = False
@@ -107,16 +111,24 @@ class Recorder:
             self.started_at = time.time()
             self.fights_queued = 0
             self.auto_started = auto
-            self._stop.clear()
-            self._thread = threading.Thread(target=self._scan_loop, args=(log_dir,),
-                                            name="recorder", daemon=True)
+            # Each recording has its own stop flag and session, so a previous recording that
+            # is still finishing its last logs (see _scan_loop) can't be revived or mixed in.
+            self._stop = threading.Event()
+            self._thread = threading.Thread(
+                target=self._scan_loop, args=(log_dir, self.session_id, self.started_at,
+                                              self._stop),
+                name="recorder", daemon=True)
             self._thread.start()
         log.info("recording started (session %s) watching %s", self.session_id, log_dir)
         self._emit()
         return self.state()
 
-    def stop(self, manual: bool = True) -> dict[str, Any]:
-        """Stop recording. A manual stop also pauses auto-record until the game is closed."""
+    def stop(self, manual: bool = True, wait: bool = False) -> dict[str, Any]:
+        """Stop recording. A manual stop also pauses auto-record until the game is closed.
+
+        Logs arcdps is still writing (e.g. the last fight, written as the game closes) are
+        still picked up: the scan thread finishes them, then ends the session. ``wait`` blocks
+        until it has (app shutdown)."""
         with self._lock:
             if manual and self._game_running:
                 self._auto_suppressed = True
@@ -124,47 +136,73 @@ class Recorder:
                 return self.state()
             self._stop.set()
             sid = self.session_id
+            thread = self._thread
             self.session_id = None
             self.started_at = None
             self.auto_started = False
-        if self._thread:
-            self._thread.join(timeout=5)
-        if sid is not None:
-            self.db.end_session(sid)
+        if wait and thread:
+            thread.join(timeout=self._drain_s() + 2)
         log.info("recording stopped (session %s)", sid)
         self._emit()
         return self.state()
 
+    def _drain_s(self) -> float:
+        """How long a stopped recording keeps waiting for logs that are still being written."""
+        return self.config.settings.recording.stable_s + DRAIN_EXTRA_S
+
     def _emit(self) -> None:
         self.bus.publish({"type": "recording", "recording": self.state()})
 
-    def _scan_loop(self, log_dir: Path) -> None:
+    def _scan_loop(self, log_dir: Path, session_id: int, started_at: float,
+                   stop: threading.Event) -> None:
         cfg = self.config.settings.recording
-        since = (self.started_at or time.time()) - 2.0
+        poll = max(cfg.poll_interval_s, MIN_POLL_S)
+        since = started_at - 2.0
         known = self.db.known_paths()
         candidates: dict[str, tuple[int, float, float]] = {}  # path -> (size, mtime, stable_since)
-        while not self._stop.wait(cfg.poll_interval_s):
-            now = time.time()
-            for path, st in iter_logs(log_dir, since=since):
-                key = str(path)
-                if key in known:
-                    continue
-                prev = candidates.get(key)
-                sig = (st.st_size, st.st_mtime)
-                if prev is None or (prev[0], prev[1]) != sig:
-                    candidates[key] = (st.st_size, st.st_mtime, now)
-                    continue
-                if now - prev[2] < cfg.stable_s or st.st_size == 0 or not _readable(path):
-                    continue
-                candidates.pop(key, None)
-                known.add(key)
-                fid = self.db.add_fight(key, self.session_id, st.st_mtime,
-                                       self.config.settings.fight_mode)
-                if fid is not None:
-                    self.fights_queued += 1
-                    log.info("new log %s -> fight %s", path.name, fid)
-                    self.processor.enqueue(fid)
-                    self._emit()
+        try:
+            while not stop.wait(poll):
+                self._scan(log_dir, since, session_id, known, candidates)
+            # Stopped: finish logs that are still being written (one more scan catches a log
+            # that appeared since the last one), then close the session.
+            deadline = time.time() + self._drain_s()
+            self._scan(log_dir, since, session_id, known, candidates)
+            while candidates and time.time() < deadline:
+                time.sleep(min(poll, 0.5))
+                self._scan(log_dir, since, session_id, known, candidates)
+        except Exception:
+            log.exception("recording scan failed (session %s)", session_id)
+        finally:
+            self.db.end_session(session_id)
+
+    def _scan(self, log_dir: Path, since: float, session_id: int, known: set[str],
+              candidates: dict[str, tuple[int, float, float]]) -> None:
+        cfg = self.config.settings.recording
+        now = time.time()
+        seen: set[str] = set()
+        for path, st in iter_logs(log_dir, since=since):
+            key = str(path)
+            seen.add(key)
+            if key in known:
+                continue
+            prev = candidates.get(key)
+            sig = (st.st_size, st.st_mtime)
+            if prev is None or (prev[0], prev[1]) != sig:
+                candidates[key] = (st.st_size, st.st_mtime, now)
+                continue
+            if now - prev[2] < cfg.stable_s or st.st_size == 0 or not _readable(path):
+                continue
+            candidates.pop(key, None)
+            known.add(key)
+            fid = self.db.add_fight(key, session_id, st.st_mtime,
+                                   self.config.settings.fight_mode)
+            if fid is not None:
+                self.fights_queued += 1
+                log.info("new log %s -> fight %s", path.name, fid)
+                self.processor.enqueue(fid)
+                self._emit()
+        for gone in candidates.keys() - seen:  # deleted or renamed before it was complete
+            del candidates[gone]
 
     # ---- manual import -----------------------------------------------------------------
     def _import_candidates(self, folder: Path | None, since: float | None,
@@ -203,6 +241,12 @@ class Recorder:
                     until: float | None = None, files: list[str] | None = None
                     ) -> dict[str, Any]:
         """Queue existing WvW logs; sessions are grouped by the log's date (one per raid day)."""
+        # Uploads import in parallel: one at a time, so a day's session is created only once.
+        with self._import_lock:
+            return self._import_logs(folder, since, until, files)
+
+    def _import_logs(self, folder: Path | None, since: float | None, until: float | None,
+                     files: list[str] | None) -> dict[str, Any]:
         c = self._import_candidates(folder, since, until, files)
         fight_ids: list[int] = list(c["known"])
         sessions: dict[str, int] = {}

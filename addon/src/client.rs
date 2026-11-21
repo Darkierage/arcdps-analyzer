@@ -4,23 +4,31 @@
 
 use crate::model::Overlay;
 use std::ops::RangeInclusive;
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// The analyzer picks the first free port from 8765 (see `choose_port` in `main.py`).
 pub const PORTS: RangeInclusive<u16> = 8765..=8785;
 const POLL: Duration = Duration::from_secs(2);
 const SEARCH: Duration = Duration::from_secs(5);
+/// Per port while searching. A closed port on Windows takes ~2 s to refuse, so this is what a
+/// miss costs; a running analyzer on localhost answers in well under a millisecond.
+const CONNECT_TIMEOUT: Duration = Duration::from_millis(200);
+/// Whole request. Also bounds how long unloading the addon can wait for this thread.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(2);
+/// A failed button action's message stays this long.
+const ACTION_ERROR_FOR: Duration = Duration::from_secs(15);
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Status {
     /// No analyzer found yet.
     Searching,
     Connected,
-    /// The analyzer is newer than this addon understands.
-    Incompatible(String),
+    /// Connected but nothing to show: the analyzer is newer than this addon understands, or it
+    /// answered with an error.
+    Problem(String),
 }
 
 #[derive(Debug, Clone)]
@@ -73,7 +81,9 @@ impl Client {
         self.shared.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// Stops the thread; returns once it has exited (at most one request timeout).
+    /// Stops the thread; returns once it has exited. Runs on the game's thread when the addon
+    /// unloads, so the worker checks for Stop between ports while searching: the wait is at most
+    /// one request (`REQUEST_TIMEOUT`, normally a few ms).
     pub fn stop(&mut self) {
         let _ = self.tx.send(Msg::Stop);
         if let Some(h) = self.handle.take() {
@@ -96,8 +106,12 @@ enum Fetch {
 enum FetchError {
     /// Lost the analyzer: search again.
     Gone,
-    Incompatible(String),
+    /// Still there, but no usable payload (shown in the window).
+    Problem(String),
 }
+
+/// The addon is unloading.
+struct Stopped;
 
 struct Worker {
     agent: ureq::Agent,
@@ -105,19 +119,20 @@ struct Worker {
     port: Option<u16>,
     etag: Option<String>,
     selected: Option<i64>,
+    action_error_at: Option<Instant>,
     shared: Arc<Mutex<Snapshot>>,
 }
 
 impl Worker {
     fn new(ports: RangeInclusive<u16>, shared: Arc<Mutex<Snapshot>>) -> Self {
         let agent = ureq::Agent::config_builder()
-            .timeout_connect(Some(Duration::from_millis(300)))
-            .timeout_global(Some(Duration::from_secs(3)))
+            .timeout_connect(Some(CONNECT_TIMEOUT))
+            .timeout_global(Some(REQUEST_TIMEOUT))
             .http_status_as_error(false)
             .proxy(None)
             .build()
             .into();
-        Self { agent, ports, port: None, etag: None, selected: None, shared }
+        Self { agent, ports, port: None, etag: None, selected: None, action_error_at: None, shared }
     }
 
     fn update(&self, f: impl FnOnce(&mut Snapshot)) {
@@ -128,7 +143,18 @@ impl Worker {
     fn run(mut self, rx: Receiver<Msg>) {
         loop {
             if self.port.is_none() {
-                self.port = self.discover();
+                let mut pending = Vec::new();
+                match self.discover(&rx, &mut pending) {
+                    Ok(port) => self.port = port,
+                    Err(Stopped) => return,
+                }
+                for cmd in pending {
+                    self.handle(cmd);
+                }
+            }
+            if self.action_error_at.is_some_and(|t| t.elapsed() >= ACTION_ERROR_FOR) {
+                self.action_error_at = None;
+                self.update(|s| s.action_error = None);
             }
             if let Some(port) = self.port {
                 match self.fetch(port) {
@@ -137,10 +163,13 @@ impl Worker {
                         s.data = Some(*o);
                     }),
                     Ok(Fetch::Unchanged) => {}
-                    Err(FetchError::Incompatible(msg)) => self.update(|s| {
-                        s.status = Status::Incompatible(msg);
-                        s.data = None;
-                    }),
+                    Err(FetchError::Problem(msg)) => {
+                        self.etag = None;
+                        self.update(|s| {
+                            s.status = Status::Problem(msg);
+                            s.data = None;
+                        })
+                    }
                     Err(FetchError::Gone) => {
                         self.port = None;
                         self.etag = None;
@@ -177,24 +206,43 @@ impl Worker {
                     Ok(mut r) => Some(detail(&r.body_mut().read_to_string().unwrap_or_default())),
                     Err(e) => Some(e.to_string()),
                 };
+                self.action_error_at = error.as_ref().map(|_| Instant::now());
                 self.update(|s| s.action_error = error);
             }
         }
         self.etag = None; // always fetch fresh data after an action
     }
 
-    fn discover(&self) -> Option<u16> {
-        self.ports.clone().find(|&port| {
+    /// Tries each port in turn, checking for Stop in between (a full pass over closed ports
+    /// takes seconds on Windows). Commands that arrive meanwhile go to `pending`.
+    fn discover(
+        &self,
+        rx: &Receiver<Msg>,
+        pending: &mut Vec<Command>,
+    ) -> Result<Option<u16>, Stopped> {
+        for port in self.ports.clone() {
+            loop {
+                match rx.try_recv() {
+                    Ok(Msg::Cmd(cmd)) => pending.push(cmd),
+                    Ok(Msg::Stop) | Err(TryRecvError::Disconnected) => return Err(Stopped),
+                    Err(TryRecvError::Empty) => break,
+                }
+            }
             let url = format!("http://127.0.0.1:{port}/api/status");
-            self.agent
+            let found = self
+                .agent
                 .get(&url)
                 .call()
                 .ok()
                 .filter(|r| r.status().is_success())
                 .and_then(|mut r| r.body_mut().read_to_string().ok())
                 .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
-                .is_some_and(|v| v["app"] == "wvw-analyzer")
-        })
+                .is_some_and(|v| v["app"] == "wvw-analyzer");
+            if found {
+                return Ok(Some(port));
+            }
+        }
+        Ok(None)
     }
 
     fn fetch(&mut self, port: u16) -> Result<Fetch, FetchError> {
@@ -219,11 +267,13 @@ impl Worker {
                 let etag =
                     resp.headers().get("etag").and_then(|v| v.to_str().ok()).map(str::to_owned);
                 let text = resp.body_mut().read_to_string().map_err(|_| FetchError::Gone)?;
-                let overlay = Overlay::parse(&text).map_err(FetchError::Incompatible)?;
+                let overlay = Overlay::parse(&text).map_err(FetchError::Problem)?;
                 self.etag = etag;
                 Ok(Fetch::New(Box::new(overlay)))
             }
-            _ => Err(FetchError::Gone),
+            code => Err(FetchError::Problem(format!(
+                "WvW Analyzer answered with an error (HTTP {code}). Check the app."
+            ))),
         }
     }
 }
@@ -241,7 +291,6 @@ mod tests {
     use super::*;
     use std::io::{BufRead, BufReader, Write};
     use std::net::TcpListener;
-    use std::time::Instant;
 
     const FIXTURE: &str = include_str!("../tests/fixtures/overlay.json");
 
@@ -318,6 +367,37 @@ mod tests {
         let started = Instant::now();
         client.stop();
         assert!(started.elapsed() < Duration::from_secs(4));
+    }
+
+    /// Four consecutive ports whose listeners never answer: each request waits for its timeout,
+    /// like closed ports do on Windows.
+    fn silent_ports() -> (RangeInclusive<u16>, Vec<TcpListener>) {
+        for _ in 0..50 {
+            let first = TcpListener::bind("127.0.0.1:0").unwrap();
+            let base = first.local_addr().unwrap().port();
+            if base > u16::MAX - 4 {
+                continue;
+            }
+            let rest: Vec<_> =
+                (1..4).filter_map(|i| TcpListener::bind(("127.0.0.1", base + i)).ok()).collect();
+            if rest.len() == 3 {
+                let mut all = vec![first];
+                all.extend(rest);
+                return (base..=base + 3, all);
+            }
+        }
+        panic!("no four free consecutive ports");
+    }
+
+    #[test]
+    fn stop_interrupts_a_port_search() {
+        let (ports, _listeners) = silent_ports();
+        let mut client = Client::start(ports);
+        std::thread::sleep(Duration::from_millis(100));
+        let started = Instant::now();
+        client.stop();
+        // One request timeout at most, not one per port (4 x 2 s).
+        assert!(started.elapsed() < REQUEST_TIMEOUT + Duration::from_millis(700));
     }
 
     #[test]

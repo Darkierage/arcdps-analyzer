@@ -1,6 +1,7 @@
 # WvW Analyzer: in-game overlay (Nexus addon) plan
 
-> **Status:** approved 2026-11-20, released in 0.5.0 (2026-11-21) after an in-game check.
+> **Status:** approved 2026-11-20, released in 0.5.0 (2026-11-21) after an in-game check;
+> fixes from the post-release review are in DECISIONS.md (released in 0.5.1).
 > Deviations:
 > - The Phase 0 spike only covered the build (the DLL exports `GetAddonDef`, and Nexus and
 >   `arcdps-imgui` both use ImGui 1.80). Loading it in game moved to the final check.

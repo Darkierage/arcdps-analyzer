@@ -38,9 +38,17 @@ def split_rounds(active: np.ndarray, t: np.ndarray, gap_s: float, grace_s: float
     return out
 
 
+# An event this close before a round's first active second still belongs to it (activity is
+# counted in whole seconds).
+ROUND_LEAD_S = 1.0
+
+
 def round_of(ts: float, rounds: list[Round]) -> int | None:
-    """Index of the round an event at ``ts`` belongs to, None if it is after a call-off."""
+    """Index of the round an event at ``ts`` belongs to; None if it is after a call-off, in
+    the lull before the next round or after the last one."""
     for i, r in enumerate(rounds):
+        if i > 0 and ts < r.start - ROUND_LEAD_S:
+            return None
         if ts <= r.end:
             return i
     return None

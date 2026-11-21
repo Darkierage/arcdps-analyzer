@@ -1,7 +1,9 @@
 //! The in-game window and the addon's options section (ImGui through Nexus).
 
 use crate::client::{Client, Command, Snapshot, Status};
-use crate::model::{Fight, Overlay, Session, result_color, severity_color, severity_label};
+use crate::model::{
+    Fight, NewFights, Overlay, Session, result_color, severity_color, severity_label,
+};
 use crate::settings::Settings;
 use nexus::imgui::{Condition, Slider, TreeNodeFlags, Ui, Window};
 use std::path::PathBuf;
@@ -15,10 +17,9 @@ pub struct App {
     pub client: Client,
     pub settings: Settings,
     settings_path: Option<PathBuf>,
-    /// Fight being browsed; None follows the latest one.
-    selected: Option<i64>,
-    /// Latest fight id seen, to notice new fights for auto-show.
-    last_latest: Option<i64>,
+    /// Options changed but not written yet (waits until no slider is being dragged).
+    settings_dirty: bool,
+    new_fights: NewFights,
     show_when_out_of_combat: bool,
 }
 
@@ -29,8 +30,8 @@ impl App {
             client,
             settings,
             settings_path,
-            selected: None,
-            last_latest: None,
+            settings_dirty: false,
+            new_fights: NewFights::default(),
             show_when_out_of_combat: false,
         }
     }
@@ -48,25 +49,24 @@ impl App {
         }
     }
 
-    fn select(&mut self, id: Option<i64>) {
-        self.selected = id;
+    /// Show a fight; picking the current session's newest one means following the latest again.
+    fn select(&mut self, id: Option<i64>, latest: Option<i64>) {
+        let id = if id.is_some() && id == latest { None } else { id };
         self.client.send(Command::Select(id));
     }
 
     /// Notice a newly analyzed fight; with auto-show, open on it once out of combat.
     fn track_new_fights(&mut self, in_combat: bool) {
-        let latest = {
+        let is_new = {
             let snap = self.client.snapshot();
-            snap.data.as_ref().and_then(|d| d.session.as_ref()).and_then(|s| s.latest_id)
-        };
-        if latest.is_some() && latest != self.last_latest {
-            if self.last_latest.is_some() && self.settings.auto_show {
-                self.show_when_out_of_combat = true;
-                if self.selected.is_some() {
-                    self.select(None);
-                }
+            match &snap.data {
+                Some(d) => self.new_fights.observe(d.latest.as_ref()),
+                None => false,
             }
-            self.last_latest = latest;
+        };
+        if is_new && self.settings.auto_show {
+            self.show_when_out_of_combat = true;
+            self.client.send(Command::Select(None));
         }
         if self.show_when_out_of_combat && !in_combat {
             self.show_when_out_of_combat = false;
@@ -84,6 +84,7 @@ impl App {
         }
         let mut open = true;
         let mut actions: Vec<Action> = Vec::new();
+        let mut latest = None;
         Window::new("WvW Analyzer###wvw_analyzer")
             .opened(&mut open)
             .size([460.0, 420.0], Condition::FirstUseEver)
@@ -91,11 +92,12 @@ impl App {
             .collapsible(false)
             .build(ui, || {
                 let snap = self.client.snapshot();
-                draw(ui, &snap, self.selected.is_some(), &mut actions);
+                latest = snap.data.as_ref().and_then(|d| d.latest.as_ref()).map(|l| l.id);
+                draw(ui, &snap, latest, &mut actions);
             });
         for a in actions {
             match a {
-                Action::Select(id) => self.select(id),
+                Action::Select(id) => self.select(id, latest),
                 Action::Record(on) => self.client.send(Command::SetRecording(on)),
             }
         }
@@ -117,7 +119,10 @@ impl App {
             GRAY,
             "Toggle the window with the Quick Access icon or ALT+SHIFT+W (Nexus keybinds).",
         );
-        if self.settings != before {
+        // Saved once the slider is let go, not on every frame of a drag.
+        self.settings_dirty |= self.settings != before;
+        if self.settings_dirty && !ui.is_any_item_active() {
+            self.settings_dirty = false;
             self.save();
         }
     }
@@ -128,16 +133,14 @@ enum Action {
     Record(bool),
 }
 
-fn draw(ui: &Ui, snap: &Snapshot, browsing: bool, actions: &mut Vec<Action>) {
+fn draw(ui: &Ui, snap: &Snapshot, latest: Option<i64>, actions: &mut Vec<Action>) {
     match &snap.status {
         Status::Searching => {
             ui.text_wrapped("WvW Analyzer isn't running.");
             ui.text_colored(GRAY, "Start the WvW Analyzer app (0.5.0 or newer) on this PC.");
             return;
         }
-        Status::Incompatible(msg) => {
-            ui.text_colored(ORANGE, "");
-            ui.same_line();
+        Status::Problem(msg) => {
             ui.text_wrapped(msg);
             return;
         }
@@ -152,7 +155,7 @@ fn draw(ui: &Ui, snap: &Snapshot, browsing: bool, actions: &mut Vec<Action>) {
     if let Some(_bar) = ui.tab_bar("tabs") {
         if let Some(_tab) = ui.tab_item("Fight") {
             match &data.fight {
-                Some(f) => fight_tab(ui, f, browsing, actions),
+                Some(f) => fight_tab(ui, f, latest, actions),
                 None => ui.text_colored(GRAY, "No analyzed fights in this session yet."),
             }
         }
@@ -190,7 +193,7 @@ fn status_line(ui: &Ui, data: &Overlay, actions: &mut Vec<Action>) {
     }
 }
 
-fn fight_tab(ui: &Ui, f: &Fight, browsing: bool, actions: &mut Vec<Action>) {
+fn fight_tab(ui: &Ui, f: &Fight, latest: Option<i64>, actions: &mut Vec<Action>) {
     // Navigation: older < Fight n of N > newer, Latest.
     if let Some(prev) = f.prev_id {
         if ui.small_button("<") {
@@ -210,7 +213,8 @@ fn fight_tab(ui: &Ui, f: &Fight, browsing: bool, actions: &mut Vec<Action>) {
             actions.push(Action::Select(Some(next)));
         }
     }
-    if browsing && f.next_id.is_some() {
+    // Browsing anything but the current session's newest fight (maybe in an older session).
+    if latest.is_some_and(|id| id != f.id) {
         ui.same_line();
         if ui.small_button("Latest") {
             actions.push(Action::Select(None));

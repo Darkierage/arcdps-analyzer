@@ -38,7 +38,8 @@ class CompAudit(Detector):
             if avg_cleanse >= self.cfg["min_avg_cleanses"] and \
                     p["cleanses"] < self.cfg["low_cleanse_share"] * avg_cleanse:
                 missing.append(f"low cleanses ({int(p['cleanses'])} vs {int(avg_cleanse)} avg)")
-            if m.summary["hasHealData"] and p["healing"] <= 0:
+            # Without a healing-addon user in the party its healing simply wasn't recorded.
+            if p.get("has_heal_data") and p["healing"] <= 0:
                 missing.append("no healing")
             if missing:
                 downs = sum(1 for e in tl.squad_downs if e["group"] == g)

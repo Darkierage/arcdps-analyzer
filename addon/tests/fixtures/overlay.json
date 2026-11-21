@@ -9,6 +9,10 @@
     "pending": 0,
     "busy": false
   },
+  "latest": {
+    "id": 2,
+    "addedAt": "2026-11-21T01:02:51"
+  },
   "session": {
     "id": 1,
     "name": "Raid",

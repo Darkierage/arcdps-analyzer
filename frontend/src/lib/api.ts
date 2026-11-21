@@ -107,6 +107,11 @@ export interface Timeline {
 	t: number[];
 	squad: Series;
 	parties: Record<string, Series>;
+	/** "squad" / party group -> boon id: coverage % of up members; "<id>s": average stacks.
+	 * Missing for fights analyzed before 0.5.1. */
+	boons?: Record<string, Series>;
+	/** [boon id, name] for the ids in `boons`, in display order. */
+	boonNames?: [string, string][];
 	squadDowns: DownEvent[];
 	squadDeaths: { t: number; player: string; group: number }[];
 	enemyDowns: number[];
@@ -421,5 +426,6 @@ export const api = {
 	overlayAddon: () => request<OverlayAddonStatus>('GET', '/api/overlay-addon'),
 	installOverlayAddon: (gw2Dir: string | null) =>
 		request<OverlayAddonStatus>('POST', '/api/overlay-addon/install', { gw2Dir: gw2Dir ?? '' }),
-	uninstallOverlayAddon: () => request<OverlayAddonStatus>('POST', '/api/overlay-addon/uninstall')
+	uninstallOverlayAddon: (gw2Dir: string | null) =>
+		request<OverlayAddonStatus>('POST', '/api/overlay-addon/uninstall', { gw2Dir: gw2Dir ?? '' })
 };

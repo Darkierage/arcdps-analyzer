@@ -28,6 +28,12 @@ def _strip_title(title: str) -> str:
     return re.sub(r"\s*\([^)]*\)\s*$", "", title).strip()
 
 
+def _counted(s: dict[str, Any], key: str) -> int | None:
+    """Kills or deaths that count: in GvG, those after a call-off are left out."""
+    v = s.get(key)
+    return None if v is None else v - (s.get(key + "Late") or 0)
+
+
 def aggregate_session(items: list[dict[str, Any]]) -> dict[str, Any]:
     results: dict[str, int] = defaultdict(int)
     gvg_rounds: dict[str, int] = defaultdict(int)  # round results across GvG fights
@@ -44,10 +50,12 @@ def aggregate_session(items: list[dict[str, Any]]) -> dict[str, Any]:
         for r in s.get("rounds") or [] if s.get("mode") == "gvg" else []:
             gvg_rounds[r["result"]] += 1
         for k in totals:
-            totals[k] += s.get(k) or 0
+            # GvG: downs and deaths after a call-off don't count (the fight page agrees).
+            totals[k] += (s.get(k) or 0) - (s.get(k + "Late") or 0)
         fights.append({"id": it["id"], "map": s.get("map"), "start": s.get("start"),
                        "result": s.get("result"), "durationS": s.get("durationS"),
-                       "squadDeaths": s.get("squadDeaths"), "enemyDeaths": s.get("enemyDeaths"),
+                       "squadDeaths": _counted(s, "squadDeaths"),
+                       "enemyDeaths": _counted(s, "enemyDeaths"),
                        "squadCount": s.get("squadCount"), "enemyCount": s.get("enemyCount"),
                        "topIssue": s.get("topIssue"), "mode": s.get("mode", "zerg"),
                        "rounds": len(s.get("rounds") or []),

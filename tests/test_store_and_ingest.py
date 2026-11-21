@@ -64,8 +64,33 @@ def test_recorder_waits_for_complete_log(tmp_path: Path):
         assert len(proc.queued) == 1
         assert db.fight(proc.queued[0])["log_name"] == new.name
     finally:
-        rec.stop()
+        rec.stop(wait=True)
     assert db.session(rec.state()["sessionId"] or 1)["ended_at"]
+
+
+def test_stopping_still_picks_up_the_log_being_written(tmp_path: Path):
+    """E.g. auto-stop when the game closes, while arcdps writes the raid's last log."""
+    logs = tmp_path / "arcdps.cbtlogs" / "WvW (1)"
+    logs.mkdir(parents=True)
+    cfg = ConfigStore(tmp_path / "config.yaml")
+    cfg.update({"log_dir": str(tmp_path / "arcdps.cbtlogs"),
+                "recording": {"poll_interval_s": 0.1, "stable_s": 0.5}})
+    db = Database(tmp_path / "t.db")
+    proc = FakeProcessor()
+    rec = Recorder(db, cfg, EventBus(), proc)  # type: ignore[arg-type]
+    sid = rec.start()["sessionId"]
+    time.sleep(0.15)
+    (logs / "20261117-200000.zevtc").write_bytes(b"x" * 1000)  # written just before Stop
+    rec.stop()
+    assert proc.queued == [] and not rec.recording  # Stop returns at once
+    deadline = time.time() + 5
+    while not db.session(sid)["ended_at"] and time.time() < deadline:
+        time.sleep(0.05)
+    assert len(proc.queued) == 1 and db.fight(proc.queued[0])["session_id"] == sid
+    assert db.session(sid)["ended_at"]
+    sid2 = rec.start()["sessionId"]  # a new recording ignores that log
+    rec.stop(wait=True)
+    assert sid2 != sid and len(proc.queued) == 1
 
 
 def test_import_groups_by_day(tmp_path: Path):

@@ -51,9 +51,9 @@ class AppState:
     def stop(self) -> None:
         self._stop.set()
         if self.recorder.recording:
-            self.recorder.stop()
+            self.recorder.stop(wait=True)
         self.processor.stop()
-        self.llm.shutdown()
+        self.llm.shutdown(final=True)
 
     def write_debrief(self, fight_id: int) -> dict:
         fight = self.db.fight(fight_id)

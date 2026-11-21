@@ -119,5 +119,20 @@ def test_api(tmp_path: Path, bundled: Path):
         assert state.config.settings.gw2_dir == str(d)
         r = client.post("/api/overlay-addon/uninstall")
         assert r.status_code == 200 and not r.json()["installed"]
+        # Remove acts on the folder typed in Settings, not only the saved one.
+        state.config.update({"gw2_dir": None})
+        client.post("/api/overlay-addon/install", json={"gw2Dir": str(d)})
+        state.config.update({"gw2_dir": None})
+        r = client.post("/api/overlay-addon/uninstall", json={"gw2Dir": str(d)})
+        assert r.status_code == 200 and not (d / "addons" / addon_install.ADDON_DLL).exists()
         evil = client.post("/api/overlay-addon/install", headers={"Origin": "https://x.example"})
         assert evil.status_code == 403
+
+
+def test_steam_install_is_a_candidate(monkeypatch):
+    monkeypatch.setattr(addon_install, "_running_gw2_dirs", lambda: [])
+    monkeypatch.setattr(addon_install.sys, "platform", "linux")
+    monkeypatch.setattr(addon_install.paths, "is_wsl", lambda: True)
+    dirs = [str(d) for d in addon_install.candidate_dirs()]
+    assert "/mnt/c/Program Files/Guild Wars 2" in dirs
+    assert "/mnt/c/Program Files (x86)/Steam/steamapps/common/Guild Wars 2" in dirs

@@ -113,8 +113,10 @@ def enemy_breakdown(fight: Fight) -> dict[str, Any]:
 
 
 def build_summary(fight: Fight, players: list[Row], tl: Timeline) -> dict[str, Any]:
-    squad_deaths = int(sum(r["deaths"] for r in players))
-    squad_downs = int(sum(r["downs"] for r in players))
+    # Only squad members who took part: others are excluded from the fight analysis.
+    in_fight_rows = [r for r in players if r.get("in_fight", True)]
+    squad_deaths = int(sum(r["deaths"] for r in in_fight_rows))
+    squad_downs = int(sum(r["downs"] for r in in_fight_rows))
     enemy_deaths = sum(e.deaths for e in fight.enemies)
     enemy_downs = sum(e.downs for e in fight.enemies)
     cmd = fight.commander

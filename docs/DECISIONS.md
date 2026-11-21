@@ -217,18 +217,33 @@ also shows the standard per-player, per-party and per-squad log stats, like othe
 - **Dumb renderer.** `GET /api/overlay` sends finished, code-written strings: the fight
   (title, `result_line` and `framing_line` from `llm/prompts.py`, ranked notes with `short` and
   `fix_short`, positives, the stored LLM debrief if any, previous and next fight ids) and the
-  session (record, kills and deaths, top 5 recurring problems, top 3 strengths, `latestId`). The
+  session (record, kills and deaths, top 5 recurring problems, top 3 strengths), and `latest`
+  (below). The
   addon only lays them out, so wording or analysis changes need no addon update. `schema` is 1;
   the addon refuses a newer schema with "Update the in-game addon". `addon/tests/fixtures/
   overlay.json` is the contract: the Python test checks that the payload still has its shape
   and the Rust tests parse it.
 - **Polling.** A background thread polls every 2 s with `If-None-Match` (an unchanged payload is
   a 304) and searches ports 8765–8785 every 5 s when the app isn't found. It recognizes the app
-  by `"app": "wvw-analyzer"` in `/api/status`. The render thread never does I/O.
+  by `"app": "wvw-analyzer"` in `/api/status`. The render thread never does network I/O.
+- **Unloading never stalls the game.** Unloading joins the poll thread on the game's thread. On
+  Windows a closed localhost port takes about 2 s to refuse, so a search pass over 21 ports
+  takes seconds; the thread checks for Stop between ports, and every request is capped at 2 s
+  (200 ms to connect). An HTTP error from the app shows as an error in the window, not as
+  "isn't running".
 - **Local-only API unchanged.** A native client sends Host `127.0.0.1` and no Origin, which the
   existing middleware already allows, including the recording POSTs.
-- **Auto-show.** When `latestId` changes, the window opens once MumbleLink says the player is
-  out of combat (on by default). "Hide in combat" is on by default.
+- **Following the current session.** `latest` is the current session's newest fight (the
+  recording session, else the one with the most recent fight), sent even while the player
+  browses a fight of an older session. The addon shows **Latest** whenever the fight on screen
+  isn't that one, and picking it with **>** goes back to following. (In 0.5.0 the addon only
+  knew the browsed fight's session, so it could get stuck there after a new session started.)
+- **Auto-show.** The window opens, once MumbleLink says the player is out of combat, when
+  `latest.addedAt` (when the app picked up the log) moves past everything the addon has seen.
+  The first payload only sets the baseline, so fights already there at game start don't open
+  it, but the first fight of an empty session does. Deleting fights or a re-analysis doesn't
+  count (fight ids can be reused after a delete; `addedAt` keeps moving forward). On by
+  default, as is "Hide in combat". Options are saved once a slider is let go.
 - **ToS.** ArenaNet approves no add-ons, arcdps and Nexus included. The overlay keeps to what
   that setup already does: it only draws a window through Nexus; it reads no game memory and
   installs no hooks of its own; it sends no input, chat or game actions; its content comes from
@@ -236,7 +251,8 @@ also shows the standard per-player, per-party and per-squad log stats, like othe
   it connects only to 127.0.0.1. There is no clipboard or chat output, so posting a debrief
   stays a manual player action.
 - **Install from the app.** `addon_install.py` finds the GW2 folder (a Settings override, the
-  running `Gw2-64.exe`, then Program Files) and requires `addons/Nexus/`. It copies the bundled
+  running `Gw2-64.exe`, then the standalone and Steam default folders under Program Files) and
+  requires `addons/Nexus/`. Install and Remove both use the folder typed in Settings. It copies the bundled
   `bin/addon/WvWAnalyzer.dll` to `addons/WvWAnalyzer.dll.part` and renames it into place, so
   Nexus never sees half a file. It never touches anything but that DLL and the addon's
   `addons/WvWAnalyzer/` settings folder, and it never installs Nexus or arcdps. A locked DLL
@@ -265,6 +281,108 @@ also shows the standard per-player, per-party and per-squad log stats, like othe
     addons' icons. `scripts/draw_addon_icon.py` draws it.
   - Packaged 0.5.0 build: the frozen app bundles the DLL, reports it installed and up to
     date, and serves `/api/overlay`.
+  - Review after 0.5.0 (a code review and a use-case review against these docs) found the
+    stall on unload, the stuck session, no auto-show for a session's first fight, auto-show
+    on deletes, error shown as "isn't running", a stale action error, option saves on every
+    slider frame, Steam folders not found, and Remove ignoring a typed folder. All fixed, with
+    tests for the cross-session `latest`, the new-fight rule, a stop during a slow port search
+    and the typed-folder Remove.
+
+## Whole-app review fixes (2026-11-21)
+
+After 0.5.0 every area was reviewed against this file and in code (plan:
+[`plans/06-review-fixes.md`](plans/06-review-fixes.md)). The local-only API passed every Host,
+Origin and WebSocket attack tried. High and medium findings were fixed:
+
+- **Downs near the tag count.** A down is "another fight" only if it is over 5000 from both the
+  stack center and the tag. The stack center is the median of everyone alive, which includes
+  players back at a waypoint; in the corpus 37 downs within 2500 of the tag were dropped, in one
+  wipe 9 of 25. A down kept only for the tag is judged by its tag distance alone (its stack
+  distance is unknown), so `out_of_position` doesn't flag it for a center that was elsewhere.
+- **Squad totals are the fight's.** `squadDowns` and `squadDeaths` count only players in the
+  fight, matching the timeline the detectors use (36 of 142 corpus fights disagreed before).
+- **Healing is judged only where it was recorded.** It is recorded only for players running the
+  arcdps healing addon. `comp_audit` flags "no healing" only for a party with such a player, and
+  `player_outliers` compares healing only among them.
+- **GvG lulls.** A down or death between one round's call-off and the next round's first second
+  (1 s lead) belongs to no round, like events after the last round. Session totals and per-fight
+  kills/deaths leave out events after a call-off, as the fight page and LLM header do.
+- **`ANALYZER_VERSION` 4.** Corpus before/after (142 logs, zerg and GvG mode): 56 of 93 analyzed
+  fights changed, squad downs/deaths fell by 1–3 in about 30 fights, one result went from even
+  to win, and a handful of notes were added or dropped. No GvG-only change: no corpus fight has
+  an event in a lull, so that fix is covered by a unit test.
+- **Debriefs follow the analysis.** A re-analysis keeps the stored LLM debrief only if the new
+  notes and summary are identical; otherwise it is dropped (its wording came from the old ones).
+- **Stopping recording finishes the last log.** The scan thread keeps checking logs that are
+  still being written for `stable_s` + 10 s, adds them to the stopped session, then ends it.
+  Stop returns at once. Each recording has its own stop flag and session id, so a new recording
+  can start while the old one finishes. Typical case: auto-stop as the game closes while arcdps
+  writes the raid's last log.
+- **One instance.** A second launch checks each busy port from the preferred one up to the
+  first free port for a running WvW Analyzer (probing free ports is slow on Windows, so it stops
+  there) and shows that one instead of starting another on the same database.
+- **Config safety.** `config.yaml` is written to a temp file and renamed. On load, invalid values
+  fall back to their defaults one by one; an unreadable file is kept as
+  `config.yaml.broken-<time>` and the app starts with defaults and the setup screen.
+- **Settings validation.** Ranges on recording, filter, GvG (call-off grace shorter than the
+  round gap) and LLM numbers; `host` must be loopback and the API can't change host or port.
+  Detector overrides must be known keys with numbers of the default's type, never negative, and
+  counts that default to 1 or more stay at least 1. In the UI a cleared threshold means
+  "default" (it was saved as 0, which made a detector fire on nearly every fight).
+- **Imports run one at a time**, so parallel uploads can't create the same day's session twice.
+- **llama-server stops when the window closes**, before the server's shutdown, and can't be
+  started again afterwards. A debrief still running would otherwise hold up the shutdown and the
+  process would exit without stopping it.
+- **Open (low) findings:** recurring-problem severity is taken from its first fight; a skipped
+  fight keeps its old result on the session card; a player can be listed twice in
+  `player_outliers`; `boon_wipe` never fires on the corpus; some notes render empty lists ("…
+  strips: ."); the unverified-numbers check skips numbers of 10 or less; missing sessions or
+  fights return 200 instead of 404; `.zevtc.zip` passes the UI's drop filter but not the API;
+  README says non-WvW logs are kept as skipped (imports drop them) and omits the 5-squad
+  minimum; the welcome page says the LLM never runs during fights, which nothing enforces.
+
+## Boons over time per party (2026-11-21)
+
+Tester feedback: the fight timeline's "Stability per party" checkbox only showed stability; they
+wanted to pick one party and see all its boons (plan:
+[`plans/07-party-boon-timeline.md`](plans/07-party-boon-timeline.md)).
+
+- **Data.** The timeline also samples every boon in `BOONS` except Stealth per player, and sends
+  per squad and per party, each second: the share of **up** players with the boon (whole
+  percents, `null` when nobody in the party is up, the same rule as the existing stability
+  coverage) and for Stability and Might the average stacks of up players (0.1). Names go as
+  ordered `[id, name]` pairs. `ANALYZER_VERSION` 5; notes and summaries on the corpus are
+  unchanged. Size on the largest corpus fight (752 s, 8 parties): stats 640 kB → 966 kB raw,
+  115 kB → 151 kB stored (zlib).
+- **Boons tab.** A "Boons over time" chart above the table: Squad / Party N chips (professions
+  in the chip's tooltip), one line per boon, might and stability stacks dashed on a right axis,
+  that party's downs and deaths below, GvG call-off shading. Stability, Aegis, Protection,
+  Resistance, Quickness, Alacrity and Might stacks start on; legend choices survive switching
+  party.
+- **Debrief timeline.** The checkbox became a "Show" select: Squad (as before), Party N (its
+  stability, resistance, protection, avg boons, damage and downs/deaths) or All parties:
+  stability (the old checkbox view), with an "All boons →" link to the Boons tab. The party is
+  kept in the URL (`?party=2`).
+- **A way back.** **All boons →** adds a browser history entry, so Back returns to the Debrief
+  timeline; the Boons chart has **← Fight timeline**, which goes back through that entry
+  (keeping the party picked there) and scrolls to the timeline. Other tab switches still replace
+  the entry, as before.
+- **URLs come from the address bar.** SvelteKit's `pushState`/`replaceState` (shallow routing)
+  don't update `page.url`, so building the next URL from it dropped `?tab=` or `?party=` and
+  Back/Forward showed a different tab than the address bar. The page builds URLs from
+  `location.href` and follows Back/Forward with a `popstate` listener (a `?finding=` link always
+  shows the Debrief). A `?party=` the fight doesn't have falls back to the squad.
+- **Review** (use-case review in a real browser and a code review): the backend math matched the
+  existing stability/resistance/protection/aegis coverage within 1 point on all corpus fights.
+  Fixed: the URL handling above, the duplicate history entry from **← Fight timeline**, GvG
+  call-off shading tied to the Stability line (hidden with it), GvG downs left at a call-off
+  drawn as normal downs (now hollow, as on the fight timeline), the tooltip mixing percents and
+  stacks in one sort, and the chip tooltip counting players who weren't in the fight. Kept:
+  parties with nobody in the fight get no chip; the Debrief chart's legend choices reset when
+  the party changes (as before).
+- **Validated** with synthetic fights (coverage with a downed member, `null` with nobody up,
+  might stacks, every boon present per party, display order), the corpus snapshot, and the
+  dev app: fight 3 per party on both tabs.
 
 ## Open items at the time of writing
 

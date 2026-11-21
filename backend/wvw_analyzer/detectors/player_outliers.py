@@ -58,7 +58,7 @@ class PlayerOutliers(Detector):
         by_prof: dict[str, list[dict]] = defaultdict(list)
         for r in rows:
             by_prof[r["profession"]].append(r)
-        squad_med = {k: statistics.median([r[k] for r in rows]) if rows else 0
+        squad_med = {k: statistics.median(v) if (v := [r[k] for r in _known(rows, k)]) else 0
                      for k in CANDIDATES}
         flagged: list[str] = []
         for prof, members in by_prof.items():
@@ -66,7 +66,10 @@ class PlayerOutliers(Detector):
                 continue
             best_key, best_rel = None, 0.0
             for k in CANDIDATES:
-                med = statistics.median([r[k] for r in members])
+                known = _known(members, k)
+                if len(known) < self.cfg["min_same_prof"]:
+                    continue
+                med = statistics.median([r[k] for r in known])
                 if med < MIN_MEDIAN_PER_MIN[k] * (1 if k.startswith("gen_") else engage_min):
                     continue  # too little output for this to be the profession's job here
                 rel = med / squad_med[k] if squad_med[k] else 10.0
@@ -74,8 +77,9 @@ class PlayerOutliers(Detector):
                     best_key, best_rel = k, rel
             if not best_key:
                 continue
-            med = statistics.median([r[best_key] for r in members])
-            for r in members:
+            known = _known(members, best_key)
+            med = statistics.median([r[best_key] for r in known])
+            for r in known:
                 if r[best_key] < self.cfg["below_median"] * med:
                     flagged.append(
                         f"{r['name']} ({prof}): {CANDIDATES[best_key]} {_short(r[best_key])} "
@@ -102,6 +106,11 @@ class PlayerOutliers(Detector):
                       else f"{len(flagged)} players were",
                       "players": "; ".join(flagged[: self.cfg["max_listed"]])},
         )]
+
+
+def _known(rows: list[dict], key: str) -> list[dict]:
+    """Rows where the metric was recorded: healing needs the arcdps healing addon."""
+    return [r for r in rows if r.get("has_heal_data")] if key == "healing" else rows
 
 
 def _short(v: float) -> str:

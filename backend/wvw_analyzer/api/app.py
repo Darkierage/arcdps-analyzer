@@ -309,7 +309,14 @@ def create_app(state: AppState) -> FastAPI:
 
     @app.put("/api/settings")
     def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
+        # Where the API listens is not a page setting: a LAN address would expose it (and the
+        # local-only checks would then block the app's own window).
+        for key in ("host", "port"):
+            if key in patch and patch[key] != getattr(state.config.settings, key):
+                raise HTTPException(400, f"{key} can only be changed in config.yaml")
         try:
+            if "detectors" in patch:
+                patch = {**patch, "detectors": registry.check_overrides(patch["detectors"])}
             state.config.update(patch)
         except Exception as e:
             raise HTTPException(400, f"Invalid settings: {e}") from e

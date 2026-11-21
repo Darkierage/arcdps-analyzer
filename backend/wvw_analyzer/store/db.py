@@ -194,6 +194,16 @@ class Database:
     def save_analysis(self, fight_id: int, summary: dict[str, Any], stats: dict[str, Any],
                       notes: dict[str, Any]) -> None:
         with self._lock:
+            # A stored debrief was worded from the previous notes and summary: keep it only if
+            # the re-analysis produced exactly the same ones.
+            old = self._conn.execute(
+                """SELECT f.summary, a.notes FROM fights f JOIN analyses a ON a.fight_id=f.id
+                   WHERE f.id=?""", (fight_id,)).fetchone()
+            if old is not None and (old["summary"], old["notes"]) != (_dumps(summary),
+                                                                    _dumps(notes)):
+                self._conn.execute(
+                    "UPDATE analyses SET debrief=NULL, debrief_at=NULL WHERE fight_id=?",
+                    (fight_id,))
             self._conn.execute(
                 """UPDATE fights SET status='done', error=NULL, fight_start=?, result=?,
                    summary=?, updated_at=? WHERE id=?""",

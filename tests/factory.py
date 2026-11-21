@@ -31,8 +31,10 @@ def player(
     not_in_squad: bool = False,
     boons_states: list[list[float]] | None = None,
     active: list[tuple[float, float]] | None = None,
+    buffs: dict[int, list[list[float]]] | None = None,
 ) -> dict[str, Any]:
-    """``active`` = (start_s, end_s) windows with damage dealt/taken; default the whole log."""
+    """``active`` = (start_s, end_s) windows with damage dealt/taken; default the whole log.
+    ``buffs`` = extra boon states by EI buff id, e.g. {1187: [[0, 1], [30_000, 0]]}."""
     n = duration_ms // POLL + 1
     pos = [[pos_inches[0] * PX, pos_inches[1] * PX]] * n
     secs = duration_ms // 1000 + 1
@@ -60,6 +62,8 @@ def player(
         "buffUptimes": [
             {"id": 1122, "buffData": [{"uptime": 1.0, "presence": 50.0}],
              "states": stab if stab is not None else [[0, 0]]},
+            *({"id": bid, "buffData": [{"uptime": 0.0}], "states": states}
+              for bid, states in (buffs or {}).items()),
         ],
         "squadBuffs": [{"id": 1122, "buffData": [{"generation": 0.5}]}],
         "boonsStates": boons_states or [[0, 6]],

@@ -25,15 +25,17 @@
 		CanvasRenderer
 	]);
 
+	// party: 'squad', a party's group number (its own boons, damage and downs), or 'all'
+	// (the squad chart plus one stability line per party).
 	let {
 		timeline,
 		highlight = null,
-		partyLines = false,
+		party = 'squad',
 		height = 420
 	}: {
 		timeline: Timeline;
 		highlight?: [number, number] | null;
-		partyLines?: boolean;
+		party?: string;
 		height?: number;
 	} = $props();
 
@@ -64,7 +66,10 @@
 	function option() {
 		const tl = timeline;
 		const t = tl.t;
-		const sq = tl.squad;
+		const one = party !== 'squad' && party !== 'all' && tl.parties[party] ? party : null;
+		const sq = one ? tl.parties[one] : tl.squad;
+		const who = one ? `Party ${one}` : 'Squad';
+		const mine = (d: { group: number }) => !one || String(d.group) === one;
 		const lane = (color: string) => ({ itemStyle: { color }, symbolSize: 9, yAxisIndex: 2, xAxisIndex: 2 });
 		// GvG: shade what follows each call-off (regroup / rezzing; not part of the fight).
 		const tEnd = t[t.length - 1] ?? 0;
@@ -157,11 +162,11 @@
 				itemStyle: { color: C.heal }
 			},
 			{
-				name: 'Squad down',
+				name: `${who} down`,
 				type: 'scatter',
 				...lane(C.down),
 				symbol: 'triangle',
-				data: tl.squadDowns.filter((d) => !d.left).map((d) => ({ value: [d.t, 1], d })),
+				data: tl.squadDowns.filter((d) => !d.left && mine(d)).map((d) => ({ value: [d.t, 1], d })),
 				symbolSize: 9
 			},
 			...(rounds.length
@@ -172,7 +177,7 @@
 							...lane(C.down),
 							symbol: 'triangle',
 							itemStyle: hollow(C.down),
-							data: tl.squadDowns.filter((d) => d.left).map((d) => ({ value: [d.t, 1], d })),
+							data: tl.squadDowns.filter((d) => d.left && mine(d)).map((d) => ({ value: [d.t, 1], d })),
 							symbolSize: 9
 						},
 						{
@@ -187,12 +192,12 @@
 					]
 				: []),
 			{
-				name: 'Squad death',
+				name: `${who} death`,
 				type: 'scatter',
 				...lane(C.dead),
 				symbol: 'path://M2 2 L10 10 M10 2 L2 10',
 				itemStyle: { color: C.dead, borderColor: C.dead, borderWidth: 2.5 },
-				data: tl.squadDeaths.map((d) => ({ value: [d.t, 1], d })),
+				data: tl.squadDeaths.filter(mine).map((d) => ({ value: [d.t, 1], d })),
 				symbolSize: 8
 			},
 			{
@@ -212,7 +217,7 @@
 				symbolSize: 7
 			}
 		];
-		if (partyLines) {
+		if (party === 'all') {
 			Object.entries(tl.parties).forEach(([g, s], i) => {
 				series.push({
 					name: `Party ${g} stab`,
@@ -289,7 +294,7 @@
 				{
 					gridIndex: 2,
 					type: 'category',
-					data: ['Enemy', 'Squad'],
+					data: ['Enemy', who],
 					axisLabel: { color: C.text, fontSize: 10 },
 					axisLine: { show: false },
 					axisTick: { show: false }
@@ -315,7 +320,7 @@
 	$effect(() => {
 		// Re-render when inputs change.
 		void highlight;
-		void partyLines;
+		void party;
 		void timeline;
 		chart?.setOption(option(), { notMerge: true });
 	});

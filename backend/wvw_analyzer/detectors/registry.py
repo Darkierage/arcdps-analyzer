@@ -36,6 +36,35 @@ DETECTORS: list[type[Detector]] = [
 ]
 
 
+def check_overrides(overrides: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Validated detector overrides from Settings: known detectors and keys only, numbers of
+    the default's type, never negative, and counts that default to 1 or more stay at least 1
+    (a cleared field must not silently become 0). Raises ValueError with a readable message."""
+    by_name = {cls.name: cls for cls in DETECTORS}
+    out: dict[str, dict[str, Any]] = {}
+    for name, values in (overrides or {}).items():
+        cls = by_name.get(name)
+        if cls is None or not isinstance(values, dict):
+            raise ValueError(f"unknown detector {name!r}")
+        clean: dict[str, Any] = {}
+        for key, v in values.items():
+            if key == "enabled":
+                if not isinstance(v, bool):
+                    raise ValueError(f"{name}.enabled must be true or false")
+                clean[key] = v
+                continue
+            if key not in cls.defaults:
+                raise ValueError(f"{name} has no setting {key!r}")
+            default = cls.defaults[key]
+            if isinstance(v, bool) or not isinstance(v, (int, float)) or v != v:
+                raise ValueError(f"{name}.{key} must be a number")
+            if v < 0 or (isinstance(default, int) and default >= 1 and v < 1):
+                raise ValueError(f"{name}.{key} is out of range ({v})")
+            clean[key] = int(v) if isinstance(default, int) and float(v).is_integer() else v
+        out[name] = clean
+    return out
+
+
 def build(overrides: dict[str, dict[str, Any]] | None = None) -> list[Detector]:
     overrides = overrides or {}
     return [cls(overrides.get(cls.name)) for cls in DETECTORS]

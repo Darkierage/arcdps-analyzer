@@ -10,6 +10,8 @@ import numpy as np
 
 from ..model.fight import (
     AEGIS,
+    BOONS,
+    INTENSITY_BOONS,
     PROTECTION,
     RESISTANCE,
     STABILITY,
@@ -22,8 +24,10 @@ from ..model.fight import (
 from .rounds import Round, down_left, round_of, split_rounds
 
 NEAR_STACK = 2500.0  # inches from the stack center to count as "with the squad"
-REMOTE_DOWN = 5000.0  # downs farther than this from the stack belong to another fight
+REMOTE_DOWN = 5000.0  # downs farther than this from the stack (and tag) are another fight
 GVG_ACTIVITY = 0.01  # share of peak per-second damage that still counts as fighting in GvG
+# Boons drawn over time per party (the fight page's Boons tab); Stealth isn't a boon.
+TIMELINE_BOONS = [bid for bid, name in BOONS.items() if name != "Stealth"]
 
 
 def positions_at(actor: Actor, fight: Fight, times_ms: np.ndarray) -> np.ndarray:
@@ -75,6 +79,7 @@ class PlayerTimeline:
     dmg_in: np.ndarray
     healing: np.ndarray
     barrier: np.ndarray
+    boon: dict[int, np.ndarray] = field(default_factory=dict)  # TIMELINE_BOONS -> stacks
     in_fight: bool = True
     near_share: float = 1.0
     fight_dist_tag: float | None = None  # median distance to tag while up, during engagement
@@ -87,6 +92,8 @@ class Timeline:
     players: list[PlayerTimeline]
     squad: dict[str, np.ndarray] = field(default_factory=dict)
     parties: dict[int, dict[str, np.ndarray]] = field(default_factory=dict)
+    # "squad" / party group -> boon id (coverage) and "<id>s" (average stacks) -> series
+    boon_series: dict[str, dict[str, np.ndarray]] = field(default_factory=dict)
     squad_downs: list[dict[str, Any]] = field(default_factory=list)
     squad_deaths: list[dict[str, Any]] = field(default_factory=list)
     enemy_downs: list[float] = field(default_factory=list)
@@ -110,12 +117,23 @@ class Timeline:
         def clean(a: np.ndarray) -> list[float | None]:
             return [None if not np.isfinite(x) else round(float(x), 3) for x in a]
 
+        def clean_1(a: np.ndarray) -> list[float | None]:
+            return [None if not np.isfinite(x) else round(float(x), 1) for x in a]
+
         return {
             "t": self.t.tolist(),
             "squad": {k: clean(v) for k, v in self.squad.items()},
             "parties": {
                 str(g): {k: clean(v) for k, v in s.items()} for g, s in self.parties.items()
             },
+            # Coverage as whole percents (compact: ~13 series per party), stacks to 0.1.
+            "boons": {
+                who: {k: _percents(v) if not k.endswith("s") else clean_1(v)
+                      for k, v in s.items()}
+                for who, s in self.boon_series.items()
+            },
+            # [id, name] pairs in display order (a JSON object's numeric keys get re-sorted).
+            "boonNames": [[str(bid), BOONS[bid]] for bid in TIMELINE_BOONS],
             "squadDowns": self.squad_downs,
             "squadDeaths": self.squad_deaths,
             "enemyDowns": [round(x, 2) for x in self.enemy_downs],
@@ -151,6 +169,7 @@ def _player_timeline(p: Player, fight: Fight, times_ms: np.ndarray, n: int) -> P
         dmg_in=_cumulative_to_rate(_first_phase(p.raw, "damageTaken1S"), n),
         healing=_cumulative_to_rate(_first_phase(ext_h, "healing1S"), n),
         barrier=_cumulative_to_rate(_first_phase(ext_b, "barrier1S"), n),
+        boon={bid: sample_states(p.buff_states(bid), times_ms) for bid in TIMELINE_BOONS},
     )
 
 
@@ -163,6 +182,25 @@ def _coverage(pts: list[PlayerTimeline], attr: str) -> np.ndarray:
     n_up = up.sum(axis=0)
     with np.errstate(invalid="ignore", divide="ignore"):
         return np.where(n_up > 0, has.sum(axis=0) / n_up, np.nan)
+
+
+def _boon_series(pts: list[PlayerTimeline]) -> dict[str, np.ndarray]:
+    """Per boon: share of up members having it (like `_coverage`), and for stacking boons
+    the average stacks of up members (like `_mean_up`). NaN when nobody is up."""
+    up = np.stack([p.up for p in pts])
+    n_up = up.sum(axis=0)
+    out: dict[str, np.ndarray] = {}
+    with np.errstate(invalid="ignore", divide="ignore"):
+        for bid in TIMELINE_BOONS:
+            vals = np.stack([p.boon[bid] for p in pts])
+            out[str(bid)] = np.where(n_up > 0, ((vals > 0) & up).sum(axis=0) / n_up, np.nan)
+            if bid in INTENSITY_BOONS:
+                out[f"{bid}s"] = np.where(n_up > 0, (vals * up).sum(axis=0) / n_up, np.nan)
+    return out
+
+
+def _percents(a: np.ndarray) -> list[int | None]:
+    return [None if not np.isfinite(x) else int(round(float(x) * 100)) for x in a]
 
 
 def _mean_up(pts: list[PlayerTimeline], attr: str) -> np.ndarray:
@@ -258,6 +296,7 @@ def build_timeline(fight: Fight, mode: str = "zerg", round_gap_s: float = 25.0,
 
     fighting = [p for p in pts if p.in_fight] or pts
     tl.squad = _group_series(fighting)
+    tl.boon_series["squad"] = _boon_series(fighting)
     if tl.gvg:
         # After a call-off nobody deals damage at all, so any real fighting (even the low-level
         # finishing of downs at the end of a round) still belongs to the round. Only players at
@@ -271,6 +310,7 @@ def build_timeline(fight: Fight, mode: str = "zerg", round_gap_s: float = 25.0,
         members = [p for p in fighting if p.player.group == g]
         if members:
             tl.parties[g] = _group_series(members)
+            tl.boon_series[str(g)] = _boon_series(members)
 
     fi = np.array([p.in_fight for p in pts])
     with warnings.catch_warnings():
@@ -301,8 +341,14 @@ def _collect_events(fight: Fight, tl: Timeline, center: np.ndarray) -> None:
             c = center[int(np.clip(np.floor(ts), 0, len(center) - 1))]
             if np.all(np.isfinite(c)) and np.all(np.isfinite(ppos)):
                 d_center = float(np.linalg.norm(ppos - c))
+            # Went down somewhere else on the map: not part of this fight. The stack center is
+            # the median of everyone alive, which includes players back at a waypoint, so a
+            # down near the tag always counts.
+            near_tag = d_tag is not None and d_tag <= REMOTE_DOWN
             if d_center is not None and d_center > REMOTE_DOWN:
-                continue  # went down somewhere else on the map, not part of this fight
+                if not near_tag:
+                    continue
+                d_center = None  # the center was off (e.g. at a waypoint): judge by the tag
             tl.squad_downs.append({
                 "t": round(ts, 2),
                 "round": round_of(ts, tl.rounds),

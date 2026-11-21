@@ -76,6 +76,27 @@ def test_latest_fight_browsing_and_session(tmp_path: Path):
         assert client.get("/api/overlay", params={"fight": 9999}).status_code == 404
 
 
+def test_latest_follows_the_current_session_while_browsing_an_older_one(tmp_path: Path):
+    client, state = make_client(tmp_path)
+    with client:
+        old = state.db.create_session("Monday", "recording")
+        a1 = add_fight(state, old, "a1")
+        a2 = add_fight(state, old, "a2")
+        p = client.get("/api/overlay").json()
+        assert p["latest"]["id"] == a2 and p["latest"]["addedAt"]
+
+        # A new session starts (recording) while the player looks at Monday's newest fight.
+        state.recorder.session_id = new = state.db.create_session("Tuesday", "recording")
+        browsing = client.get("/api/overlay", params={"fight": a2}).json()
+        assert browsing["session"]["name"] == "Monday" and browsing["fight"]["nextId"] is None
+        assert browsing["latest"] is None  # Tuesday has no fight yet
+        b1 = add_fight(state, new, "b1")
+        browsing = client.get("/api/overlay", params={"fight": a1}).json()
+        assert browsing["latest"]["id"] == b1  # so the addon offers "Latest" and auto-shows
+        assert browsing["session"]["latestId"] == a2
+        state.recorder.session_id = None
+
+
 def test_etag_returns_304_until_something_changes(tmp_path: Path):
     client, state = make_client(tmp_path)
     with client:

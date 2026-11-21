@@ -10,10 +10,10 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, Response
-from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
 from .. import __version__, addon_install
@@ -56,6 +56,12 @@ def _session_id(state: AppState) -> int | None:
         return state.recorder.session_id
     sessions = state.db.sessions()
     return sessions[0]["id"] if sessions else None
+
+
+def _done_fights(state: AppState, session_id: int) -> list[dict[str, Any]]:
+    """Analyzed fights of a session, newest first."""
+    return [r for r in state.db.fights(session_id=session_id, include_skipped=False)
+            if r["status"] == "done"]
 
 
 def _fight_block(state: AppState, fight_id: int, done: list[dict[str, Any]]) -> dict[str, Any]:
@@ -113,23 +119,31 @@ def build_overlay(state: AppState, fight_id: int | None = None) -> dict[str, Any
         "version": __version__,
         "recording": {"active": rec["recording"], "logDirOk": rec["logDirOk"]},
         "queue": {"pending": queue["pending"], "busy": queue["current"] is not None},
+        "latest": None,
         "session": None,
         "fight": None,
     }
+    current = _session_id(state)
+    current_done = _done_fights(state, current) if current is not None else []
+    if current_done:
+        # The current session's newest fight, whatever fight is being browsed: the addon goes
+        # back to it ("Latest") and opens itself when `addedAt` moves forward. `addedAt` (when
+        # the log was picked up) doesn't change on a re-analysis, unlike the fight's status.
+        payload["latest"] = {"id": current_done[0]["id"],
+                             "addedAt": max(r["created_at"] for r in current_done)}
     if fight_id is not None:
         row = state.db.fight(fight_id)
         if not row or row.get("status") != "done":
             raise HTTPException(404, "Fight not found")
         session_id = row.get("session_id")
     else:
-        session_id = _session_id(state)
+        session_id = current
     if session_id is None:
         return payload
-    done = [r for r in state.db.fights(session_id=session_id, include_skipped=False)
-            if r["status"] == "done"]
+    done = current_done if session_id == current else _done_fights(state, session_id)
     payload["session"] = _session_block(state, session_id)
     payload["session"]["recording"] = rec["sessionId"] == session_id
-    # Lets the addon notice a new fight (auto-show) while the player browses older ones.
+    # Newest fight of this session (addons from 0.5.0 used it; newer ones read `latest`).
     payload["session"]["latestId"] = done[0]["id"] if done else None
     target = fight_id if fight_id is not None else (done[0]["id"] if done else None)
     if target is not None:
@@ -145,15 +159,14 @@ def router(state: AppState) -> APIRouter:
     r = APIRouter()
 
     # ---- installing the addon (Settings > In-game overlay) ----------------------------
+    # Plain `def` handlers: FastAPI runs them in its thread pool, so the folder checks (slow on
+    # a /mnt/c path) never block the event loop.
     def _override() -> str | None:
         return state.config.settings.gw2_dir
 
-    @r.get("/api/overlay-addon")
-    async def addon_status() -> dict[str, Any]:
-        return await run_in_threadpool(addon_install.status, _override())
-
-    @r.post("/api/overlay-addon/install")
-    async def addon_install_(body: AddonInstall | None = None) -> dict[str, Any]:
+    def _gw2_dir(body: AddonInstall | None) -> Path:
+        """The folder typed in Settings (stored, like the main Save would), else the saved or
+        detected one."""
         if body and body.gw2Dir is not None:
             folder = body.gw2Dir.strip() or None
             if folder and addon_install.find_gw2_dir(folder) is None:
@@ -162,22 +175,27 @@ def router(state: AppState) -> APIRouter:
         gw2 = addon_install.find_gw2_dir(_override())
         if gw2 is None:
             raise HTTPException(400, "Guild Wars 2 folder not found - choose it first")
+        return gw2
+
+    @r.get("/api/overlay-addon")
+    def addon_status() -> dict[str, Any]:
+        return addon_install.status(_override())
+
+    @r.post("/api/overlay-addon/install")
+    def addon_install_(body: AddonInstall | None = None) -> dict[str, Any]:
         try:
-            await run_in_threadpool(addon_install.install, gw2)
+            addon_install.install(_gw2_dir(body))
         except (RuntimeError, OSError) as e:
             raise HTTPException(400, str(e)) from e
-        return await run_in_threadpool(addon_install.status, _override())
+        return addon_install.status(_override())
 
     @r.post("/api/overlay-addon/uninstall")
-    async def addon_uninstall() -> dict[str, Any]:
-        gw2 = addon_install.find_gw2_dir(_override())
-        if gw2 is None:
-            raise HTTPException(400, "Guild Wars 2 folder not found")
+    def addon_uninstall(body: AddonInstall | None = None) -> dict[str, Any]:
         try:
-            await run_in_threadpool(addon_install.uninstall, gw2)
+            addon_install.uninstall(_gw2_dir(body))
         except (RuntimeError, OSError) as e:
             raise HTTPException(400, str(e)) from e
-        return await run_in_threadpool(addon_install.status, _override())
+        return addon_install.status(_override())
 
     # ---- the overlay payload ------------------------------------------------------------
 
