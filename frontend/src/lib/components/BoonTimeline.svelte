@@ -7,14 +7,27 @@
 	import { CanvasRenderer } from 'echarts/renderers';
 	import type { Timeline } from '#lib/api.ts';
 	import { duration } from '#lib/format.ts';
+	import { eventsSection, secondsPerPixels, trackPointer } from '#lib/timelineEvents.ts';
 
 	use([LineChart, ScatterChart, GridComponent, TooltipComponent, LegendComponent, MarkAreaComponent, DataZoomComponent, CanvasRenderer]);
 
-	let { timeline, party = 'squad', height = 380 }: { timeline: Timeline; party?: string; height?: number } = $props();
+	let {
+		timeline,
+		party = 'squad',
+		professions = {},
+		height = 380
+	}: {
+		timeline: Timeline;
+		party?: string;
+		/** Player name -> profession, for the death lines in the tooltip. */
+		professions?: Record<string, string>;
+		height?: number;
+	} = $props();
 
 	let el: HTMLDivElement;
 	let chart: EChartsType | null = null;
 	let ro: ResizeObserver | null = null;
+	let pointerX: () => number | null = () => null;
 
 	const C = { text: '#8a93a8', line: '#222a3d', down: '#f59e42', dead: '#f2555a' };
 	// EI buff id -> line color. Ids without an entry fall back to gray.
@@ -140,7 +153,7 @@
 				textStyle: { color: '#e7eaf2', fontSize: 12 },
 				formatter: (params: any[]) => {
 					if (!params.length) return '';
-					const x = params[0].value?.[0] ?? params[0].axisValue;
+					const x = pointerX() ?? params[0].value?.[0] ?? params[0].axisValue;
 					const lines = [`<b>${duration(x)}</b>`];
 					// Boons by coverage (highest first), then the stack counts.
 					const rows = params.filter((p) => p.value?.[1] != null && p.seriesType !== 'scatter');
@@ -149,7 +162,18 @@
 					for (const p of rows) {
 						lines.push(`${p.marker}${p.seriesName}: <b>${isStacks(p) ? p.value[1] : p.value[1] + '%'}</b>`);
 					}
-					return lines.join('<br/>');
+					// Who went down or died under the pointer (the markers alone only show when).
+					const group = party === 'squad' ? null : party;
+					// Same defaults as the legend: the markers start shown.
+					const shown = (name: string) => selected[name] !== false;
+					return (
+						lines.join('<br/>') +
+						eventsSection(tl, x, secondsPerPixels(chart, x), {
+							group,
+							professions,
+							shown: { downs: shown('Down'), leftDowns: shown('Left at call-off'), deaths: shown('Death') }
+						})
+					);
 				}
 			},
 			axisPointer: { link: [{ xAxisIndex: 'all' }] },
@@ -180,6 +204,7 @@
 
 	onMount(() => {
 		chart = init(el, undefined, { renderer: 'canvas' });
+		pointerX = trackPointer(chart);
 		chart.on('legendselectchanged', (e: any) => (selected = { ...e.selected }));
 		chart.setOption(option());
 		ro = new ResizeObserver(() => chart?.resize());

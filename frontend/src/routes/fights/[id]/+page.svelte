@@ -175,6 +175,11 @@
 	// "all parties" view.
 	const debriefParty = $derived(party === 'all' || partyIds.includes(party) ? party : 'squad');
 	const boonParty = $derived(debriefParty === 'all' ? 'squad' : debriefParty);
+	// Player name -> profession, for the chart tooltips' death lines.
+	const professions = $derived(
+		Object.fromEntries((stats?.players ?? []).map((r) => [r.name as string, r.profession as string]))
+	);
+
 	/** Chip tooltip: the party's players who took part (the ones the chart is about). */
 	function partyTitle(g: string): string {
 		const profs = (stats?.players ?? [])
@@ -406,7 +411,8 @@
 						</label>
 						<button class="text-xs text-accent hover:underline" onclick={openBoons}>All boons →</button>
 					</div>
-					<FightTimeline timeline={stats.timeline} {highlight} party={debriefParty} />
+					<FightTimeline timeline={stats.timeline} {highlight} party={debriefParty} {professions} />
+					<p class="mt-1 text-xs text-faint">Hover a ▲ down or ✕ death marker to see who.</p>
 				</div>
 
 				<div class="grid gap-5 lg:grid-cols-3">
@@ -505,10 +511,11 @@
 							</div>
 						</div>
 						{#if stats.timeline.boons}
-							<BoonTimeline timeline={stats.timeline} party={boonParty} />
+							<BoonTimeline timeline={stats.timeline} party={boonParty} {professions} />
 							<p class="mt-1 text-xs text-faint">
 								% of the {boonParty === 'squad' ? "squad's" : "party's"} players (up, not downed or dead) who had the
-								boon each second; dashed lines are average stacks (right axis). Click a boon in the legend to show or
+								boon each second; dashed lines are average stacks (right axis). Hover a ▲ / ✕ marker to see who went
+								down or died. Click a boon in the legend to show or
 								hide it.
 							</p>
 						{:else}

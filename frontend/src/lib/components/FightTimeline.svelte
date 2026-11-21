@@ -12,6 +12,7 @@
 	import { CanvasRenderer } from 'echarts/renderers';
 	import type { Timeline } from '#lib/api.ts';
 	import { compact, duration } from '#lib/format.ts';
+	import { eventsSection, secondsPerPixels, trackPointer } from '#lib/timelineEvents.ts';
 
 	use([
 		LineChart,
@@ -31,17 +32,23 @@
 		timeline,
 		highlight = null,
 		party = 'squad',
+		professions = {},
 		height = 420
 	}: {
 		timeline: Timeline;
 		highlight?: [number, number] | null;
 		party?: string;
+		/** Player name -> profession, for the death lines in the tooltip. */
+		professions?: Record<string, string>;
 		height?: number;
 	} = $props();
 
 	let el: HTMLDivElement;
 	let chart: EChartsType | null = null;
 	let ro: ResizeObserver | null = null;
+	let pointerX: () => number | null = () => null;
+	// Legend items switched off since the last render (a re-render resets the legend).
+	let legend: Record<string, boolean> = {};
 
 	const C = {
 		text: '#8a93a8',
@@ -252,8 +259,22 @@
 				textStyle: { color: '#e7eaf2', fontSize: 12 },
 				formatter: (params: any[]) => {
 					if (!params.length) return '';
-					const x = params[0].value?.[0] ?? params[0].axisValue;
+					const x = pointerX() ?? params[0].value?.[0] ?? params[0].axisValue;
 					const lines = [`<b>${duration(x)}</b>`];
+					// Who went down or died under the pointer (the markers alone only show when).
+					const shown = (name: string) => legend[name] !== false;
+					const events = eventsSection(tl, x, secondsPerPixels(chart, x), {
+						group: one,
+						enemies: true,
+						professions,
+						shown: {
+							downs: shown(`${who} down`),
+							leftDowns: shown('Left at call-off'),
+							deaths: shown(`${who} death`),
+							enemyDowns: shown('Enemy down'),
+							enemyDeaths: shown('Enemy death')
+						}
+					});
 					for (const p of params) {
 						const v = p.value?.[1];
 						if (v == null || p.seriesType === 'scatter') continue;
@@ -263,7 +284,7 @@
 						else txt = v + '%';
 						lines.push(`${p.marker}${p.seriesName}: <b>${txt}</b>`);
 					}
-					return lines.join('<br/>');
+					return lines.join('<br/>') + events;
 				}
 			},
 			axisPointer: { link: [{ xAxisIndex: 'all' }] },
@@ -312,6 +333,8 @@
 
 	onMount(() => {
 		chart = init(el, undefined, { renderer: 'canvas' });
+		pointerX = trackPointer(chart);
+		chart.on('legendselectchanged', (e: any) => (legend = { ...e.selected }));
 		chart.setOption(option());
 		ro = new ResizeObserver(() => chart?.resize());
 		ro.observe(el);
@@ -322,6 +345,7 @@
 		void highlight;
 		void party;
 		void timeline;
+		legend = {};
 		chart?.setOption(option(), { notMerge: true });
 	});
 

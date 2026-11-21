@@ -13,7 +13,9 @@ A local desktop app for Guild Wars 2 **WvW (zerg) fights**. It turns arcdps logs
 - **Boons over time, per party.** The Boons tab charts every boon second by second for the squad
   or one party (share of its players who had it, plus might and stability stacks), with that
   party's downs and deaths. On the Debrief tab the fight timeline can show one party instead
-  of the squad, or every party's stability.
+  of the squad, or every party's stability. Hover a down or death marker on either chart to see
+  who it was (profession, party, whether they got up, stability before the down, distance to
+  the tag).
 - **Sessions.** One per raid night, with aggregated stats, leaderboards, recurring problems and
   strengths. Click a problem or strength to see the fights behind it, each with its numbers;
   a fight opens its debrief at that note. **See stats** on a note opens the stat table behind

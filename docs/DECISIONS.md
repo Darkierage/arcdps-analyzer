@@ -384,6 +384,38 @@ wanted to pick one party and see all its boons (plan:
   might stacks, every boon present per party, display order), the corpus snapshot, and the
   dev app: fight 3 per party on both tabs.
 
+## Who went down: marker tooltips (2026-11-21)
+
+Tester feedback: the down and death markers under the charts show when, not who (plan:
+[`plans/08-marker-tooltips.md`](plans/08-marker-tooltips.md)).
+
+- **One tooltip, with the events added.** ECharts can't mix an axis tooltip with per-marker
+  tooltips, so both charts keep their axis tooltip and add the squad (or selected party's)
+  downs and deaths within ±8 px of the pointer, converted to seconds at the current zoom:
+  name in its profession color, profession, party, time; for a down also got up / died,
+  stability stacks just before, distance to the tag and "left at call-off" (GvG). The fight
+  timeline also counts enemy downs/deaths there (enemies are anonymous). Up to 8 lines, then
+  "+N more"; names are HTML-escaped. Shared code: `frontend/src/lib/timelineEvents.ts`.
+- **Pointer time.** The time comes from the mouse position (`trackPointer`), not the tooltip's
+  params: over the marker lane ECharts passes the nearest marker's data, which showed the wrong
+  player (a 0:09 down while pointing at 0:30) in the first browser check. The pixel is kept and
+  converted when the tooltip is drawn, so a mouse-wheel zoom or resize (which redraws the
+  tooltip without a mouse move) can't use a stale time.
+- **What's listed.** Only marker kinds that are shown: a kind switched off in the legend (downs,
+  downs left at a call-off, deaths, enemy downs/deaths) isn't listed either. With more than 8
+  events in the window, the 8 closest to the pointer are kept (so the hovered marker is always
+  there), shown in time order, plus "+N more nearby". A GvG down left at a call-off that didn't
+  end in a death says "left at call-off", not "got up" (it may never have ended).
+- **No analysis change.** Deaths carry no profession, so it is looked up from the fight's
+  players on the page; no backend change, no `ANALYZER_VERSION` bump.
+- **Validated** in the dev app: fight 2 and 3, squad and Party 2/4 on both charts, several
+  events in the same second, hovering away from markers (no events section), mouse-wheel zoom
+  without moving, a legend kind switched off and on. A use-case review drove a headless browser
+  over synthetic and corpus fights: every marker of a 52-marker fight named its player on both
+  charts, 0 mismatches between pointer and tooltip in pixel scans (zoomed and not), GvG
+  call-offs, an 11-death second, a 20-minute fight, and names with HTML characters rendered as
+  text. A code review confirmed the pointer handler runs before the tooltip is drawn.
+
 ## Open items at the time of writing
 
 - No "Trends across sessions" page (original plan, phase 6).
