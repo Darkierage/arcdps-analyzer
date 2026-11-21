@@ -3,6 +3,7 @@
 	import { api, type OverlayAddonStatus, type SettingsResponse } from '#lib/api.ts';
 	import { live, toasts } from '#lib/live.svelte.ts';
 	import Icon from '#lib/components/Icon.svelte';
+	import { copyDiagnostics, openDataFolder } from '#lib/diagnostics.ts';
 
 	let data = $state<SettingsResponse | null>(null);
 	let s = $state<any>(null);
@@ -104,6 +105,13 @@
 	}
 
 	const llm = $derived(live.llm);
+
+	let diagBusy = $state(false);
+	async function copyReport() {
+		diagBusy = true;
+		await copyDiagnostics();
+		diagBusy = false;
+	}
 </script>
 
 <!-- Same page container as everywhere else; the form itself stays a readable width. -->
@@ -281,7 +289,7 @@
 			</p>
 		</section>
 
-		<section class="card mb-10 p-5" id="llm">
+		<section class="card mb-5 p-5" id="llm">
 			<h2 class="mb-1 flex items-center gap-2 font-semibold"><Icon name="sparkles" class="size-4 text-accent" />Local LLM debrief (optional)</h2>
 			<p class="mb-4 text-sm text-muted">
 				A small model running on your CPU rewrites the findings into a short debrief. It runs at idle priority with
@@ -345,6 +353,20 @@
 						</button>
 					{/if}
 				</div>
+			</div>
+		</section>
+
+		<section class="card mb-10 p-5" id="troubleshooting">
+			<h2 class="mb-1 flex items-center gap-2 font-semibold"><Icon name="wrench" class="size-4 text-accent" />Troubleshooting</h2>
+			<p class="mb-4 text-sm text-muted">
+				If something doesn't work, copy the diagnostics and send them to whoever helps you with the app (a Discord
+				message is fine). They hold the app version, the setup checks, recent errors and crashes, and the end of the
+				app log. Your Windows user name and account names are removed. Nothing is sent anywhere automatically.
+			</p>
+			<div class="flex flex-wrap items-center gap-3 rounded-lg border border-line bg-panel-2 p-3 text-sm">
+				<span class="min-w-0 flex-1 truncate text-xs text-faint" title={live.dataDir}>App folder: {live.dataDir}</span>
+				<button class="btn" onclick={openDataFolder}><Icon name="folder" class="size-4" /> Open app folder</button>
+				<button class="btn btn-primary" disabled={diagBusy} onclick={copyReport}>Copy diagnostics</button>
 			</div>
 		</section>
 	{/if}

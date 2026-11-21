@@ -197,6 +197,18 @@ Run `WvWAnalyzer-Setup-<version>.exe`.
   and settings in `%LOCALAPPDATA%\WvWAnalyzer`. The default is to keep them. Your arcdps logs are
   never touched.
 
+## Troubleshooting
+
+If something goes wrong, open **Settings > Troubleshooting** and click **Copy diagnostics**,
+then paste the result into a message to whoever helps you. It holds the app version, the setup
+checks, recent errors and crashes, and the end of the app log, with your Windows user name and
+account names removed. Nothing is sent anywhere automatically. The same report is saved as
+`diagnostics.txt` in `%LOCALAPPDATA%\WvWAnalyzer` (**Open app folder**). Each app start
+writes its own log in the `logs` folder there, so the log of a run that crashed is still there
+after a restart. Logs are kept for 14 days (at most 30 runs and 100 MB).
+
+When the app crashed or closed unexpectedly, a banner offers the same button on the next start.
+
 ## Building the app and installer
 
 Requires uv, Node.js 22.17+ (or `-SkipFrontend` with a prebuilt `frontend/build`) and Inno Setup 6

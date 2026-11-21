@@ -312,6 +312,15 @@ export interface AppStatus {
 	eiPath: string;
 	llm: LlmStatus;
 	dataDir: string;
+	crashes: CrashRecord[];
+}
+
+/** A crash or unexpected exit the user hasn't dismissed yet (GET /api/status). */
+export interface CrashRecord {
+	at: string;
+	kind: 'crash' | 'error' | 'exit';
+	message: string;
+	version: string;
 }
 
 export interface DetectorInfo {
@@ -427,5 +436,9 @@ export const api = {
 	installOverlayAddon: (gw2Dir: string | null) =>
 		request<OverlayAddonStatus>('POST', '/api/overlay-addon/install', { gw2Dir: gw2Dir ?? '' }),
 	uninstallOverlayAddon: (gw2Dir: string | null) =>
-		request<OverlayAddonStatus>('POST', '/api/overlay-addon/uninstall', { gw2Dir: gw2Dir ?? '' })
+		request<OverlayAddonStatus>('POST', '/api/overlay-addon/uninstall', { gw2Dir: gw2Dir ?? '' }),
+	diagnostics: () =>
+		request<{ text: string; path: string | null }>('POST', '/api/diagnostics', { userAgent: navigator.userAgent }),
+	openDataFolder: () => request<{ opened: boolean; path: string }>('POST', '/api/diagnostics/open-folder'),
+	dismissCrashes: () => request<{ ok: boolean }>('POST', '/api/diagnostics/dismiss')
 };

@@ -258,6 +258,19 @@ class Database:
         args.append(limit)
         return [self._fight_row(r) for r in self._all(sql, tuple(args))]
 
+    def player_names(self) -> set[str]:
+        """Account and character names in stored fights (to redact the diagnostics report)."""
+        rows = self._all(
+            """SELECT DISTINCT json_extract(p.value, '$.account') AS a,
+                               json_extract(p.value, '$.name') AS n
+               FROM analyses, json_each(analyses.players) AS p
+               WHERE analyses.players IS NOT NULL AND json_valid(analyses.players)""")
+        rows += self._all(
+            """SELECT DISTINCT json_extract(summary, '$.commander') AS a,
+                               json_extract(summary, '$.pov') AS n
+               FROM fights WHERE summary IS NOT NULL AND json_valid(summary)""")
+        return {v for r in rows for v in (r["a"], r["n"]) if isinstance(v, str) and v}
+
     def active_fights(self) -> list[dict[str, Any]]:
         q = ",".join("?" * len(ACTIVE_STATUSES))
         return self._all(f"SELECT * FROM fights WHERE status IN ({q}) ORDER BY id",

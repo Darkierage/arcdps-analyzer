@@ -416,6 +416,163 @@ Tester feedback: the down and death markers under the charts show when, not who 
   call-offs, an 11-death second, a 20-minute fight, and names with HTML characters rendered as
   text. A code review confirmed the pointer handler runs before the tooltip is drawn.
 
+## Crash and error reporting (2026-11-21)
+
+Friends run the installed app on their own PCs, and failures there left little or no trace
+(plan: [`plans/09-crash-reporting.md`](plans/09-crash-reporting.md)).
+
+- **Local only, sent by hand.** No crash-upload service: that would break the
+  "no network beyond what's needed" stance and ship other people's data. Errors go to the log
+  and small files in the data folder; the user copies a report and sends it themselves.
+- **Uncaught errors.** `diagnostics.install` sets `sys.excepthook` and `threading.excepthook`:
+  the traceback goes to the log at CRITICAL (the packaged app has no console, so a dying
+  background thread used to print to nowhere) and a crash record is added. Asyncio and
+  endpoint errors already reached the log through the root logger.
+- **Unexpected exits.** `running-<pid>.json` exists while that app process runs (not for a
+  second launch that only shows the running app). Still there at the next start, with that
+  process gone, means it died. It is reported only if the PC wasn't shut down or restarted
+  since, so shutting Windows down with the app open isn't a "crash" (details in the review
+  fixes below).
+- **Native crash dumps.** Analysis workers enable `faulthandler` into `crash.log`; when one
+  dies, the processor adds a line naming the fight and the fight's error says "The analysis
+  process crashed (often: not enough free memory)" instead of `BrokenProcessPool`. The main
+  process uses faulthandler only off Windows: pywebview runs .NET there (pythonnet), and
+  faulthandler sees Windows exceptions before anything handles them. .NET raises and handles
+  some routinely (access violations for null references, for example), and each would be
+  dumped as a "Windows fatal exception", so the file would fill with false alarms. (CPython
+  already skips the CLR's own exception code, 0xE0434352.) On Windows, real crashes and hangs of our processes come
+  from the Windows event log instead (Application Error 1000, Application Hang 1002,
+  .NET Runtime 1026; `wevtutil`, last 30 days).
+- **Frontend errors.** `window.onerror` and `unhandledrejection` post to
+  `/api/client-error`, which logs them (message ≤2000 and stack ≤8000 characters, at most 50 per
+  run; the page also deduplicates and skips the ResizeObserver warning).
+- **What the user sees.** Crash records (`crashes.json`, last 20) that weren't dismissed show
+  as a banner above every page with **Copy diagnostics**. Settings > Troubleshooting has
+  **Copy diagnostics**, **Open app folder** and the folder path. The report is plain text
+  meant for a chat message: version, OS, Python, the window's user agent, setup checks (log
+  folder, Elite Insights self-test, Guild Wars 2/Nexus/overlay, LLM), fight counts by status,
+  the 10 latest failed fights with their errors, crash records, Windows event-log entries,
+  the end of `crash.log` when it holds a dump, and the end of this run's and the previous run's
+  logs (250 lines each; older logs are listed by name). It is also saved
+  as `diagnostics.txt` in the data folder, to attach when copying fails.
+- **Redaction.** The user folder becomes `%USERPROFILE%`, the Windows user name `<user>`, every
+  account and character name stored in the database `<account>` / `<player>`, and anything else
+  shaped like an account (`Name.1234`) `<account>`.
+- **API.** `POST /api/diagnostics`, `/api/diagnostics/open-folder` (fixed path, nothing taken
+  from the request), `/api/diagnostics/dismiss`, `/api/client-error`; `GET /api/status` gains
+  `crashes`. All behind the existing localhost Host/Origin checks. `dataDir` in the status is
+  now the folder next to the database (the same folder in the app; tests no longer touch the
+  real data folder through it).
+- **No analysis change**, no `ANALYZER_VERSION` bump.
+- **Validated:** tests for the hooks, unclean-exit detection (including after a reboot), record
+  cap, redaction, the report sections, the endpoints and their origin checks, client-error
+  truncation and cap, and a real spawn worker that dies (`os._exit`). Live run from WSL: a
+  `kill -9` was reported as "closed unexpectedly" on the next start, a posted frontend error
+  reached the log, the report replaced the user name, and a clean stop removed the marker. Not
+  checked yet: the Windows event-log query, the clipboard in the packaged WebView2 window,
+  and the banner on screen.
+
+## Window froze on start: pywebview walked the .NET UI (2026-11-21)
+
+A friend's 0.5.2 "crashed" when the app started and began analyzing the previous evening's
+session (87 logs). The app log had nothing useful: it was one rotating file shared by every
+run, and the next start had already replaced what mattered.
+
+- **Reproduced.** The friend's 87 logs analyze cleanly from source in WSL and in the packaged
+  0.5.2 exe on Windows without a window (`--no-window`): no failures, analysis worker peak
+  386 MB, main process ~85 MB, Elite Insights peak ~1 GB. With the window, the packaged exe hung
+  on every start (6 of 6, with or without fights to analyze): within ~20 s the window was
+  "Not Responding", the API stopped answering and analysis stopped, with 1 s of CPU used, so
+  a deadlock rather than load. A user then closes it, which looks like a crash.
+- **Cause.** On each page load pywebview builds `window.pywebview.api` by walking every public
+  attribute of the `js_api` object, recursively (`webview/util.py`, `get_functions`), on a
+  background thread. `WindowApi` kept the pywebview `Window` in a public `window` attribute, so
+  the walk descended into `window.native`: the whole WinForms/WebView2 object tree, through
+  pythonnet (`AccessibilityObject.Bounds.Empty.Empty...`, "CoreWebView2 can only be accessed
+  from the UI thread" in the log). Touching UI objects off the UI thread while holding the GIL
+  deadlocks against the UI thread. From source the same walk ran but happened to survive; in
+  the frozen build it deadlocked every time here. The attribute dates from 0.3.0.
+- **Fix.** The window is kept in `WindowApi._window`; pywebview skips names starting with `_`,
+  so only `pick_folder` is exposed. `tests/test_window_api.py` applies pywebview's rule to the
+  object after `_open_window` (only methods may be public).
+- **Validated** on Windows with a packaged build of the fix and the friend's logs: import, the
+  app killed after 17 fights, then a windowed start that resumed the queue (the friend's flow).
+  The remaining 70 fights finished in ~3.5 min with the window responsive throughout, no
+  "Error while processing" lines, and the killed run reported as "closed unexpectedly".
+- **Orphaned workers.** Killing the app (Task Manager, or "close the program" on a hung window)
+  left its analysis worker running on Windows indefinitely. Workers now watch the app's process
+  (`diagnostics.exit_with_parent`, every 5 s, psutil `is_running` so a reused pid doesn't
+  count) and exit when it's gone: 4 s after a kill in the packaged build.
+- **Per-run logs.** Each start now writes `logs/wvw_analyzer-<start>-<pid>.log` (rolls over
+  once at 5 MB, so ≤10 MB per run) instead of sharing one rotating file, so the log of a run
+  that crashed survives the restart. At startup, run logs older than 14 days, beyond 30 runs or
+  100 MB in total are deleted, oldest first; the newest 3 always stay. The diagnostics report
+  includes the end of this run's and the previous run's log. The old `wvw_analyzer.log` counts
+  as one more run log (see the review fixes below).
+
+## Crash reporting: review fixes (2026-11-21)
+
+A light `/review-changes` run over the two sections above found 2 medium and 6 low issues; all
+were fixed (plan: [`plans/10-crash-reporting-review-fixes.md`](plans/10-crash-reporting-review-fixes.md)).
+
+- **Second launch.** A launch that only shows the running app no longer writes a run log (the
+  file handler is added after the port check; startup errors before it still add one). The
+  report's "this run" is the current process's log; the others are ordered by last write, not
+  by the start time in the name (robust to the clock going back).
+- **Windows shutdown with the app open** (user's choice: keep the banner and detect it). Fast
+  Startup, the default, keeps `GetTickCount64` running across a shutdown, so the boot-time
+  check alone missed it. On Windows the next start also asks the System event log
+  (`wevtutil`) for a shutdown or restart (User32 1074, EventLog 6006/6008, Kernel-General 13,
+  Kernel-Power 41); since the heartbeat (next section), only one right after the run was last
+  seen counts. The marker is also removed right after the
+  window closes, before the LLM server and uvicorn shutdown, which can take ~10 s.
+- **SIGTERM** (`--no-window`): uvicorn re-raises it after shutting down; a handler that raises
+  `SystemExit` lets the marker cleanup run.
+- **Live instances.** Markers are per process; one whose process is still alive (same pid and
+  creation time, so a reused pid doesn't count) is left alone, e.g. a hung instance next to a
+  new one.
+- **Names with spaces.** Redaction uses the stored names (players of analyzed fights,
+  commander, POV) and keeps the account pattern as a fallback for names not stored yet.
+- **Old log.** The pre-0.5.3 `wvw_analyzer.log` is a report candidate like a run log (the run
+  before an upgrade is usually the one being reported) and follows the same retention.
+- **"Open app folder"** instead of "Open log folder": it opens the data folder, which holds
+  `diagnostics.txt`, `crash.log` and `logs/` (user's choice).
+- **Validated:** a regression test per fix (second launch, report order with a clock that went
+  back, old log after upgrade, per-pid markers with a live and a reused pid, Fast Startup via the
+  event-log answer, the event-log query string, SIGTERM on a real `--no-window` process, stored
+  names with spaces, names read from a stored fight). On Windows the real query found a shutdown
+  for a start a month ago and none for a start a minute ago. Not checked: an actual Windows
+  shutdown with the app open (needs the user).
+
+## Crash reporting: heartbeat and second review fixes (2026-11-21)
+
+A second light `/review-changes` run found that any shutdown after a run started hid that
+run's crash, even one hours later: the app hangs in the evening, gets closed, the PC is shut
+down for the night, and the next start shows no banner (plan:
+[`plans/11-crash-reporting-heartbeat.md`](plans/11-crash-reporting-heartbeat.md)).
+
+- **Heartbeat** (user's choice). A running app writes `lastSeen` into its marker every 2 min
+  (`HEARTBEAT_S`). A stale marker counts as ended by Windows only if the System event log has
+  a shutdown/restart event between `lastSeen` and 5 min after it (`SHUTDOWN_GRACE_S`). The
+  boot-time check is only used when there's no event log (off Windows, or the query failed).
+  A hung app's heartbeat stops too (the thread needs the GIL), so a later shutdown can't hide
+  the hang. `end_run` stops the heartbeat under the same lock before removing the marker, so it
+  can't be written back during the cleanup after the window closes.
+- **Event times are UTC.** The query filters `@SystemTime`, which is UTC. `wevtutil /f:text`
+  prints its "Date" in local time with a `Z` suffix, which is misleading when checking by hand.
+- **Reused pid.** A marker with this process's pid is an old run (the check runs before this
+  process writes its marker) and is checked like any other.
+- **Redaction order.** Stored player names are replaced before the Windows user name, and the
+  `Name.1234` fallback accepts non-English letters.
+- **Report:** "Elite Insights: NOT INSTALLED" instead of the version it expects.
+- **Docs:** the faulthandler reason (above) and the old-log sentence were corrected.
+- **Validated:** regression tests (heartbeat writes and stops at `end_run`; a shutdown inside
+  and outside the window after `lastSeen`; boot fallback without an event log; reused pid;
+  redaction order and `Zoë.1234`; the EI line; the query string with both bounds). On Windows,
+  around a real shutdown event at 02:45:12 UTC: a window from 02:44 found it; windows
+  02:00–02:40 and from 02:46 did not. Not checked: a real shutdown with the app open (needs the
+  user).
+
 ## Open items at the time of writing
 
 - No "Trends across sessions" page (original plan, phase 6).

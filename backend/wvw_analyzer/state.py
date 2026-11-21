@@ -24,6 +24,7 @@ class AppState:
     def __init__(self, config: ConfigStore | None = None, db: Database | None = None):
         self.config = config or ConfigStore()
         self.db = db or Database()
+        self.data_dir = self.db.path.parent  # app files (log, crash records) live next to the DB
         self.bus = EventBus()
         self.processor = Processor(self.db, self.config, self.bus)
         self.recorder = Recorder(self.db, self.config, self.bus, self.processor)

@@ -16,6 +16,9 @@
 	import { importer } from '#lib/importer.svelte.ts';
 	import { api } from '#lib/api.ts';
 	import { toasts } from '#lib/live.svelte.ts';
+	import { copyDiagnostics, dismissCrashes, installErrorReporting } from '#lib/diagnostics.ts';
+
+	installErrorReporting();
 
 	let { children }: LayoutProps = $props();
 	let importOpen = $state(false);
@@ -31,6 +34,13 @@
 	}
 
 	onMount(() => live.start());
+
+	let diagBusy = $state(false);
+	async function copyReport() {
+		diagBusy = true;
+		await copyDiagnostics();
+		diagBusy = false;
+	}
 
 	// New users land on the setup screen until they finish it once.
 	$effect(() => {
@@ -121,6 +131,21 @@
 				</button>
 			</div>
 		</header>
+		{#if live.crashes.length}
+			{@const last = live.crashes[live.crashes.length - 1]}
+			<div class="flex items-center gap-3 border-b border-loss/30 bg-loss/10 px-6 py-2 text-sm">
+				<Icon name="alert" class="size-4 shrink-0 text-loss" />
+				<span class="min-w-0 flex-1 truncate" title={last.message}>
+					{last.message}
+					{#if live.crashes.length > 1}<span class="text-faint">(+{live.crashes.length - 1} more)</span>{/if}
+					<span class="text-muted">Copy the diagnostics and send them to whoever helps you with the app.</span>
+				</span>
+				<button class="btn" disabled={diagBusy} onclick={copyReport}>Copy diagnostics</button>
+				<button class="rounded-md p-1 text-faint hover:text-text" title="Dismiss" aria-label="Dismiss" onclick={dismissCrashes}>
+					<Icon name="x" class="size-4" />
+				</button>
+			</div>
+		{/if}
 		<main class="min-h-0 flex-1 overflow-y-auto">
 			{@render children()}
 		</main>

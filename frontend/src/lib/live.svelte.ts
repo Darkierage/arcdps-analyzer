@@ -1,5 +1,5 @@
 // Live app state fed by the backend WebSocket (recording, queue, fight updates).
-import { api, type FightMode, type FightRow, type LlmStatus, type QueueState, type RecordingState } from './api.ts';
+import { api, type CrashRecord, type FightMode, type FightRow, type LlmStatus, type QueueState, type RecordingState } from './api.ts';
 
 type Listener = (event: any) => void;
 
@@ -12,6 +12,8 @@ class Live {
 	version = $state('');
 	onboarded = $state<boolean | null>(null);
 	fightMode = $state<FightMode>('zerg'); // mode given to newly added fights
+	crashes = $state<CrashRecord[]>([]); // crashes / unexpected exits not dismissed yet
+	dataDir = $state('');
 	private listeners = new Set<Listener>();
 	private ws: WebSocket | null = null;
 	private retry = 0;
@@ -34,6 +36,8 @@ class Live {
 			this.version = s.version;
 			this.onboarded = s.onboarded;
 			this.fightMode = s.fightMode ?? 'zerg';
+			this.crashes = s.crashes ?? [];
+			this.dataDir = s.dataDir;
 		} catch {
 			/* backend not up yet; the socket retry loop will refresh */
 		}

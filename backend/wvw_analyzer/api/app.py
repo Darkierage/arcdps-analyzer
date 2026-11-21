@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from .. import __version__, paths
+from .. import __version__, diagnostics, paths
 from ..config import FightMode
 from ..detectors import registry
 from ..ingest.recorder import iter_logs
@@ -53,6 +53,19 @@ class SessionPatch(BaseModel):
 
 class ModeBody(BaseModel):
     mode: FightMode
+
+
+class DiagnosticsRequest(BaseModel):
+    userAgent: str | None = None
+
+
+class ClientError(BaseModel):
+    message: str = ""
+    stack: str | None = None
+    url: str | None = None
+
+
+MAX_CLIENT_ERRORS = 50  # per run: a render loop that throws must not flood the log
 
 
 def _day_ts(s: str | None, end: bool = False) -> float | None:
@@ -123,7 +136,8 @@ def create_app(state: AppState) -> FastAPI:
             "eiInstalled": ei.exists(),
             "eiPath": str(ei),
             "llm": state.llm.status(),
-            "dataDir": str(paths.data_dir()),
+            "dataDir": str(state.data_dir),
+            "crashes": diagnostics.pending_crashes(state.data_dir),
         }
 
     @app.get("/api/selftest")
@@ -332,6 +346,42 @@ def create_app(state: AppState) -> FastAPI:
     def llm_unload() -> dict[str, Any]:
         state.llm.shutdown()
         return state.llm.status()
+
+    # ---- troubleshooting --------------------------------------------------------------
+    @app.post("/api/diagnostics")
+    def make_diagnostics(body: DiagnosticsRequest | None = None) -> dict[str, Any]:
+        """Build the report a user sends when something breaks (also saved as a file)."""
+        text = diagnostics.build_report(state, body.userAgent if body else None)
+        try:
+            path = str(diagnostics.save_report(state.data_dir, text))
+        except OSError:
+            log.warning("could not save the diagnostics report", exc_info=True)
+            path = None
+        return {"text": text, "path": path}
+
+    @app.post("/api/diagnostics/open-folder")
+    def open_data_folder() -> dict[str, Any]:
+        return {"opened": diagnostics.open_folder(state.data_dir), "path": str(state.data_dir)}
+
+    @app.post("/api/diagnostics/dismiss")
+    def dismiss_crashes() -> dict[str, bool]:
+        diagnostics.dismiss_crashes(state.data_dir)
+        return {"ok": True}
+
+    client_errors = {"count": 0}
+
+    @app.post("/api/client-error")
+    def client_error(body: ClientError) -> dict[str, bool]:
+        """Errors from the page (the window has no console a user could open)."""
+        client_errors["count"] += 1
+        n = client_errors["count"]
+        if n > MAX_CLIENT_ERRORS:
+            return {"ok": False}
+        log.error("frontend error at %s: %s%s", (body.url or "?")[:300], body.message[:2000],
+                  f"\n{body.stack[:8000]}" if body.stack else "")
+        if n == MAX_CLIENT_ERRORS:
+            log.error("further frontend errors in this run are not logged")
+        return {"ok": True}
 
     # ---- live events ------------------------------------------------------------------
     @app.websocket("/ws")

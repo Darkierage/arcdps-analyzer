@@ -4,14 +4,17 @@ from __future__ import annotations
 
 import logging
 import multiprocessing
+import os
 import queue
 import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures.process import BrokenProcessPool
 from pathlib import Path
 from typing import Any
 
+from .. import diagnostics
 from ..analysis import analysis_job
 from ..config import ConfigStore
 from ..events import EventBus
@@ -92,9 +95,8 @@ class Processor:
         settings = self.config.settings.model_dump(mode="json")
         if not self.use_worker:
             return analysis_job(str(ei_json), settings, mode)
-        ctx = multiprocessing.get_context("spawn")
-        with ProcessPoolExecutor(max_workers=1, mp_context=ctx) as pool:
-            return pool.submit(analysis_job, str(ei_json), settings, mode).result()
+        return run_in_worker(analysis_job, (str(ei_json), settings, mode),
+                             self.db.path.parent / diagnostics.FAULT_FILE, ei_json.name)
 
     def runner(self) -> EIRunner:
         return EIRunner(self.config.settings.resolved_ei_path())
@@ -167,3 +169,18 @@ class Processor:
                 cb(fight_id)
             except Exception:
                 log.exception("on_done callback failed")
+
+
+def run_in_worker(job: Callable[..., Any], args: tuple, fault_log: Path, what: str) -> Any:
+    """Run job(*args) in a fresh spawn process. A native crash there (out of memory, a bad
+    library) is dumped into fault_log and reported as a readable error, not BrokenProcessPool."""
+    ctx = multiprocessing.get_context("spawn")
+    with ProcessPoolExecutor(max_workers=1, mp_context=ctx, initializer=diagnostics.worker_init,
+                             initargs=(str(fault_log), os.getpid())) as pool:
+        try:
+            return pool.submit(job, *args).result()
+        except BrokenProcessPool as e:
+            diagnostics.note_worker_crash(fault_log, what)
+            log.error("the analysis worker for %s died", what)
+            raise RuntimeError("The analysis process crashed (often: not enough free memory). "
+                               "Settings > Troubleshooting has a report to send.") from e
