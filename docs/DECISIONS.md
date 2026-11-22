@@ -525,7 +525,8 @@ were fixed (plan: [`plans/10-crash-reporting-review-fixes.md`](plans/10-crash-re
   (`wevtutil`) for a shutdown or restart (User32 1074, EventLog 6006/6008, Kernel-General 13,
   Kernel-Power 41); since the heartbeat (next section), only one right after the run was last
   seen counts. The marker is also removed right after the
-  window closes, before the LLM server and uvicorn shutdown, which can take ~10 s.
+  window closes, before the LLM server and uvicorn shutdown, which could take ~10 s (most
+  of that was the WebSocket wait fixed in "Exit after SIGTERM" below).
 - **SIGTERM** (`--no-window`): uvicorn re-raises it after shutting down; a handler that raises
   `SystemExit` lets the marker cleanup run.
 - **Live instances.** Markers are per process; one whose process is still alive (same pid and
@@ -774,6 +775,31 @@ Plan: `docs/plans/13-trends-first-slice.md`. The original plan only said "a tren
   sessions: the picker and `?stat=`, a deep link, the tooltip (a script-like name stays text),
   point and row clicks, the empty and one-session states (with a stubbed API response).
   Screenshots timed out, so nothing was checked by eye.
+
+## Exit after SIGTERM with a page connected (2026-11-22)
+
+`--no-window` didn't exit after SIGTERM: the port closed within a second, but the process
+stayed alive (seen for 6 minutes) until killed, with nothing in the log.
+
+- **Cause.** The `/ws` handler only waited for the next event and never read from its socket.
+  uvicorn tells a handler that its socket closed (page gone, or server shutting down) through
+  that read, so the handler stayed in its wait until the next event. At shutdown no event
+  comes, and uvicorn waits for open connections with no time limit. A tab closed earlier had
+  the same effect, as long as no event came after it closed. The window had it too: closing it
+  waited the full 10 s join, and the server's lifespan shutdown (stopping the processor,
+  finishing a recording's last log, the LLM) never ran before the process exited.
+- **Fix.** The handler sends events and reads from the socket at the same time, and ends as
+  soon as the socket closes. The page still sends nothing.
+- **Safety net.** uvicorn now waits at most 5 s (`SHUTDOWN_TIMEOUT_S` in `main.py`) for open
+  connections and requests at shutdown, then cancels them. A connection stuck in some future
+  way can delay the exit, but not stop it.
+- **Validated:** reproduced from WSL on a throwaway instance with a WebSocket client (open at
+  the signal, and closed before it); SIGINT forced uvicorn out and the only task it cancelled
+  was the `/ws` handler. `tests/test_shutdown.py`: SIGTERM on a real `--no-window` process with
+  the page's socket open and with it closed earlier, and the windowed path (page connected,
+  window closed) with the lifespan shutdown run. Each must finish in under 3 s, below the safety
+  net, and all three failed with the old handler. After the fix both live cases exit in 0.3 s
+  and events still reach the page. Not checked: closing the real window on Windows.
 
 ## Open items at the time of writing
 

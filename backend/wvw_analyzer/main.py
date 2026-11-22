@@ -22,6 +22,9 @@ from .config import ConfigStore
 from .state import AppState
 
 LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+# uvicorn waits this long for open connections and requests at shutdown, then cancels them, so
+# one stuck connection can't keep the process alive. Without a limit it waits forever.
+SHUTDOWN_TIMEOUT_S = 5
 _file_log: logging.Handler | None = None
 
 
@@ -174,7 +177,8 @@ def _serve(args: argparse.Namespace, config_store: ConfigStore, host: str, port:
     log = logging.getLogger("wvw_analyzer")
     state = AppState(config_store)
     server = uvicorn.Server(uvicorn.Config(create_app(state), host=host, port=port,
-                                           log_level="warning", log_config=None))
+                                           log_level="warning", log_config=None,
+                                           timeout_graceful_shutdown=SHUTDOWN_TIMEOUT_S))
     if args.no_window or args.browser:
         if args.browser:
             threading.Timer(1.5, lambda: webbrowser.open(url)).start()

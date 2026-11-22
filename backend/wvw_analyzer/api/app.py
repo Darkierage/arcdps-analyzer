@@ -411,16 +411,34 @@ def create_app(state: AppState) -> FastAPI:
             return
         await socket.accept()
         q = state.bus.subscribe()
-        try:
+
+        async def send_events() -> None:
             await socket.send_json({"type": "hello", "recording": state.recorder.state(),
                                     "queue": state.processor.state()})
             while True:
-                event = await q.get()
-                await socket.send_json(event)
-        except (WebSocketDisconnect, RuntimeError):
-            pass
+                await socket.send_json(await q.get())
+
+        async def until_closed() -> None:
+            # The page sends nothing; reading is how a closed socket is noticed. uvicorn queues
+            # a disconnect when the page goes away and when the server shuts down. Waiting only
+            # for events left this handler in q.get() until the next one, and uvicorn waits for
+            # it at shutdown with no time limit: after SIGTERM the process never exited.
+            while (await socket.receive())["type"] != "websocket.disconnect":
+                pass
+
+        sender = asyncio.create_task(send_events())
+        receiver = asyncio.create_task(until_closed())
+        try:
+            await asyncio.wait({sender, receiver}, return_when=asyncio.FIRST_COMPLETED)
         finally:
+            for task in (sender, receiver):
+                task.cancel()
+            results = await asyncio.gather(sender, receiver, return_exceptions=True)
             state.bus.unsubscribe(q)
+        for result in results:  # a closed socket is expected; anything else is a bug to log
+            if isinstance(result, Exception) and not isinstance(
+                    result, (WebSocketDisconnect, RuntimeError, OSError)):
+                raise result
 
     # ---- frontend ---------------------------------------------------------------------
     front = paths.frontend_dir()
