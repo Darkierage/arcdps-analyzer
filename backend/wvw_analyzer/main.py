@@ -35,7 +35,6 @@ def _setup_logging(verbose: bool) -> None:
         handlers.append(logging.StreamHandler())
     logging.basicConfig(level=logging.DEBUG if verbose else logging.INFO, handlers=handlers,
                         format=LOG_FORMAT)
-    logging.getLogger("asyncio").addFilter(_ProactorNoise())
 
 
 def _add_run_log() -> None:
@@ -57,11 +56,37 @@ def _exit_on_sigterm(signum: int, frame: object) -> None:
     raise SystemExit(0)
 
 
-class _ProactorNoise(logging.Filter):
-    """Windows' proactor loop logs harmless WinError 10022 when a socket closes; drop it."""
+def detach_closed_sockets(transport_cls: type) -> None:
+    """Make a closed connection always leave the asyncio server's count.
 
-    def filter(self, record: logging.LogRecord) -> bool:
-        return "_call_connection_lost" not in record.getMessage()
+    Windows' proactor loop (Python 3.12) calls sock.shutdown() when a connection closes, which
+    fails with WinError 10022 when the browser already closed its end. The error skips the rest
+    of the cleanup: the socket isn't closed and the server still counts the connection, so
+    uvicorn's last shutdown step (Server.wait_closed) waits for it forever. Closing the window
+    took the full shutdown timeout, and the log filled with the error. This finishes the cleanup
+    when that happens."""
+    original = transport_cls._call_connection_lost
+    if getattr(original, "_finishes_cleanup", False):
+        return
+
+    def _call_connection_lost(self, exc: BaseException | None) -> None:
+        try:
+            original(self, exc)
+        except OSError:
+            if self._sock is None:
+                raise  # the cleanup finished: the error came from the protocol, keep it
+            logging.getLogger("wvw_analyzer").debug("socket shutdown failed on close",
+                                                    exc_info=True)
+            self._sock.close()
+            self._sock = None
+            server = self._server
+            if server is not None:
+                server._detach()
+                self._server = None
+            self._called_connection_lost = True
+
+    _call_connection_lost._finishes_cleanup = True  # type: ignore[attr-defined]
+    transport_cls._call_connection_lost = _call_connection_lost
 
 
 def _port_free(host: str, port: int) -> bool:
@@ -164,6 +189,10 @@ def main(argv: list[str] | None = None) -> None:
     _add_run_log()
     diagnostics.enable_native_dumps(data_dir)
     signal.signal(signal.SIGTERM, _exit_on_sigterm)
+    if sys.platform == "win32":
+        from asyncio import proactor_events
+
+        detach_closed_sockets(proactor_events._ProactorBasePipeTransport)
     diagnostics.begin_run(data_dir)
     diagnostics.start_heartbeat(data_dir)
     try:

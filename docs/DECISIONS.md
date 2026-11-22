@@ -525,8 +525,8 @@ were fixed (plan: [`plans/10-crash-reporting-review-fixes.md`](plans/10-crash-re
   (`wevtutil`) for a shutdown or restart (User32 1074, EventLog 6006/6008, Kernel-General 13,
   Kernel-Power 41); since the heartbeat (next section), only one right after the run was last
   seen counts. The marker is also removed right after the
-  window closes, before the LLM server and uvicorn shutdown, which could take ~10 s (most
-  of that was the WebSocket wait fixed in "Exit after SIGTERM" below).
+  window closes, before the LLM server and uvicorn shutdown, which could take ~10 s (that
+  was the WebSocket and Windows connection waits fixed in "Exit after SIGTERM" below).
 - **SIGTERM** (`--no-window`): uvicorn re-raises it after shutting down; a handler that raises
   `SystemExit` lets the marker cleanup run.
 - **Live instances.** Markers are per process; one whose process is still alive (same pid and
@@ -799,7 +799,23 @@ stayed alive (seen for 6 minutes) until killed, with nothing in the log.
   the page's socket open and with it closed earlier, and the windowed path (page connected,
   window closed) with the lifespan shutdown run. Each must finish in under 3 s, below the safety
   net, and all three failed with the old handler. After the fix both live cases exit in 0.3 s
-  and events still reach the page. Not checked: closing the real window on Windows.
+  and events still reach the page.
+- **Windows: closed connections kept the server waiting** (found in the 0.6.1 smoke test).
+  With the handler fixed, closing the packaged app's window still took 6.3 s: uvicorn had no
+  connections or tasks left, but the asyncio server still counted 9 connections, so its last
+  step (`Server.wait_closed`) only ended at the 5 s limit. Python 3.12's proactor loop calls
+  `sock.shutdown()` when a connection closes; when the browser already closed its end that
+  fails with WinError 10022, and the rest of the cleanup (closing the socket, leaving the
+  server's count) is skipped. The app used to hide that error as log noise (`_ProactorNoise`);
+  that filter is gone. `main.detach_closed_sockets` wraps the proactor's cleanup on Windows
+  and finishes it when the shutdown fails (logged at debug). Probably most of 0.6.0's ~10 s
+  window close came from this too.
+- **Validated on Windows:** closing the window of a traced run from source took 6.3 s with
+  "Cancel 0 running task(s)" and 9 connections still counted; with the fix the count was 0,
+  uvicorn finished 0.1 s after starting to shut down and the process exited 1.5 s after the
+  window closed. `tests/test_proactor_close.py` runs the standard library's own cleanup with a
+  socket whose shutdown fails: unpatched it keeps the connection counted; patched it closes
+  and detaches it, still raises an error from the protocol, and leaves a normal close as it was.
 
 ## Open items at the time of writing
 
