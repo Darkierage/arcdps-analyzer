@@ -372,3 +372,40 @@ def aggregate_session(items: list[dict[str, Any]], detail: bool = True) -> dict[
         "columns": SESSION_COLUMNS,
         "leaderboards": boards,
     }
+
+
+# Results that decide a session's win rate. A skirmish (fewer than 3 deaths in total) is no
+# deliberate fight, so it is left out, as on the Sessions cards (W / E / L).
+DECIDED = ("win", "loss", "even")
+
+
+def session_trend(sessions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One row per session for the Trends page, in the order given.
+
+    Each session is a session row (`id`, `name`, `kind`, `start`) with `items`: its analyzed
+    fights' summaries and notes, as `aggregate_session(detail=False)` takes them. Every number
+    comes from that session summary, so this page and the session's own page agree. Sessions
+    without analyzed fights are left out."""
+    out = []
+    for s in sessions:
+        if not s["items"]:
+            continue
+        agg = aggregate_session(s["items"], detail=False)
+        totals = agg["totals"]
+        results = {k: totals["results"].get(k, 0) for k in (*DECIDED, "skirmish")}
+        decided = sum(results[k] for k in DECIDED)
+        top = agg["recurringIssues"][0] if agg["recurringIssues"] else None
+        out.append({
+            "id": s["id"], "name": s["name"], "kind": s["kind"], "start": s["start"],
+            "fights": totals["fights"],
+            "results": results,
+            # None when the session had skirmishes only: there is no rate to show.
+            "winRate": round(100 * results["win"] / decided, 1) if decided else None,
+            "kdr": totals["kdr"],
+            "deathsPerFight": round(totals["squadDeaths"] / totals["fights"], 1),
+            "squadDeaths": totals["squadDeaths"], "enemyDeaths": totals["enemyDeaths"],
+            "topIssue": None if top is None else {
+                "key": top["key"], "title": top["title"], "count": top["count"],
+                "losses": top["losses"], "severity": top["severity"]},
+        })
+    return out

@@ -739,8 +739,46 @@ open. The browser check of the fixes found one more, also fixed.
     commander's trend tooltip, the Parties footnote, the trend stat kept through a fight and back
     by the in-app link, browser Back and a reload.
 
+## Trends across sessions, first slice (2026-11-22)
+
+Plan: `docs/plans/13-trends-first-slice.md`. The original plan only said "a trends page
+(across sessions)"; this is the smallest useful part of it.
+
+- **What it shows.** A **Trends** page: one point per session with analyzed fights, oldest
+  to newest, for one of three stats (win rate, K/D, squad deaths per fight; the pick is kept in
+  `?stat=`), and a table with one row per session (newest first): fights, results, the three
+  stats and the session's top recurring problem. A point or a row opens the session.
+- **Numbers come from the session summary.** `GET /api/trends` runs
+  `aggregate_session(detail=False)` per session, so the page can't disagree with a session's
+  own Summary; GvG deaths after a call-off are left out in both.
+- **Win rate** is wins / (wins + evens + losses). Skirmishes are left out, as on the Sessions
+  cards (user's choice of the options). A session of skirmishes only has no win rate (a dash),
+  not 0%.
+- **GvG and zerg fights count together**, one result per fight, as on the Sessions page
+  (user's choice; a mode filter is not built).
+- **Sessions without analyzed fights are left out**; with no session the page says so, and
+  with one it shows the point and says a trend needs two.
+- **Escaping.** Session names are typed by the user or come from a folder name; the chart
+  tooltip is built by `sessionTooltipHtml` (`frontend/src/lib/trends.ts`), which escapes them.
+- **No analysis change**, so `ANALYZER_VERSION` stays.
+- **Review fix (2026-11-22): one fight order for both pages.** The session summary ranks
+  problems with a stable sort, so a tie goes to the problem seen first. The Trends query
+  ordered a session's fights by `COALESCE(fight_start, created_at), id` and the Summary's
+  query by `fight_start` alone; with a fight that has no start time the two could name a
+  different top problem. Both now use `FIGHT_ORDER` (`fight_start, id`) from `store/db.py`.
+  For the Summary this only adds an explicit tie-break for fights with the same start. A
+  session's start on the Trends page is its first fight that has one.
+- **Validated:** `tests/test_trends.py` (rows, order, win rate, skirmishes, GvG late deaths,
+  the top problem, a tie with a start-less fight, the API against each session's summary) and the tooltip test in
+  `frontend/tests/helpers.test.ts`. Browser check on a throwaway instance with six synthetic
+  sessions: the picker and `?stat=`, a deep link, the tooltip (a script-like name stays text),
+  point and row clicks, the empty and one-session states (with a stubbed API response).
+  Screenshots timed out, so nothing was checked by eye.
+
 ## Open items at the time of writing
 
-- No "Trends across sessions" page (original plan, phase 6).
+- The Trends page has its first slice only (results per session). Not built: problems across
+  sessions, per-player and per-party trends, squad stats, and filters by mode, date, map or
+  commander.
 - The installer and exe are not code-signed (SmartScreen warning). Signing needs a paid
   certificate or signing service.

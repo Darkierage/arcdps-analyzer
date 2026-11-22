@@ -1,6 +1,6 @@
 # WvW ArcDPS Analyzer — Implementation Plan
 
-> **Status:** approved 2026-11-17, implemented (v0.1, phases 1-5; the Trends page from phase 6 is still open). This is the plan as approved; it is kept as history and not
+> **Status:** approved 2026-11-17, implemented (v0.1, phases 1-5; the Trends page from phase 6 got its first slice in plan 13). This is the plan as approved; it is kept as history and not
 > updated. Current behavior and later decisions are in [`../DECISIONS.md`](../DECISIONS.md).
 
 ## Context

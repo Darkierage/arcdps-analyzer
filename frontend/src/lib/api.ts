@@ -292,6 +292,25 @@ export interface SessionAggregate {
 	positives: RecurringIssue[];
 }
 
+/** One session on the Trends page; the numbers are the session summary's own. */
+export interface TrendSession {
+	id: number;
+	name: string;
+	kind: 'recording' | 'import';
+	/** Start of the session's first fight. */
+	start: string | null;
+	/** Analyzed fights. */
+	fights: number;
+	results: Record<Result, number>;
+	/** Wins out of wins, evens and losses, in percent; null with skirmishes only. */
+	winRate: number | null;
+	kdr: number;
+	deathsPerFight: number;
+	squadDeaths: number;
+	enemyDeaths: number;
+	topIssue: { key: string; title: string; count: number; losses: number; severity: Severity } | null;
+}
+
 export interface SessionDetail {
 	session: SessionRow;
 	aggregate: SessionAggregate;
@@ -453,6 +472,7 @@ export const api = {
 	cancelQueue: () => request<{ cancelled: number }>('POST', '/api/queue/cancel'),
 	sessions: () => request<SessionRow[]>('GET', '/api/sessions'),
 	session: (id: number) => request<SessionDetail>('GET', `/api/sessions/${id}`),
+	trends: () => request<{ sessions: TrendSession[] }>('GET', '/api/trends'),
 	renameSession: (id: number, name: string) =>
 		request<SessionRow>('PATCH', `/api/sessions/${id}`, { name }),
 	deleteSession: (id: number) => request<{ ok: boolean }>('DELETE', `/api/sessions/${id}`),

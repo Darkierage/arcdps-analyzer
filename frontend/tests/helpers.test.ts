@@ -86,3 +86,38 @@ test('the session keeps its tab, player and trend stat in the address', async ()
 	rememberSession(7, `/sessions/7?${q}`);
 	assert.equal(sessionBackHref(7), '/sessions/7?x=1&player=Ann.1&stat=strips');
 });
+
+test('the Trends tooltip escapes the session name and the problem title', async () => {
+	const { sessionTooltipHtml, parseTrendStat, resultsText, TREND_STATS } = await import('#lib/trends.ts');
+	const s = {
+		id: 1,
+		name: `${EVIL} raid`,
+		kind: 'recording' as const,
+		start: '2026-11-21 20:00:00 +01:00',
+		fights: 7,
+		results: { win: 4, even: 1, loss: 2, skirmish: 1 },
+		winRate: 57.1,
+		kdr: 1.25,
+		deathsPerFight: 3.4,
+		squadDeaths: 24,
+		enemyDeaths: 30,
+		topIssue: { key: 'k', title: `${EVIL} deaths`, count: 3, losses: 2, severity: 'major' as const }
+	};
+	const html = sessionTooltipHtml(s, parseTrendStat('winRate'));
+	assert.ok(!html.includes('<img'), html);
+	assert.ok(html.includes('&#60;img src=x onerror=alert(1)&#62; raid'));
+	assert.ok(html.includes('Win rate: <b>57%</b>'), html);
+	assert.ok(html.includes('7 fights · 4W 1E 2L +1 skirmish'), html);
+	assert.ok(html.includes('(3 of 7)'));
+	// A session of skirmishes only has no win rate: say so instead of "0%".
+	const none = sessionTooltipHtml({ ...s, winRate: null, topIssue: null }, parseTrendStat('winRate'));
+	assert.ok(none.includes('Win rate: <b>skirmishes only</b>'), none);
+	assert.ok(!none.includes('Top problem'));
+	assert.ok(sessionTooltipHtml(s, parseTrendStat('kdr')).includes('K/D: <b>1.25</b>'));
+	assert.ok(sessionTooltipHtml({ ...s, kdr: 3 }, parseTrendStat('kdr')).includes('K/D: <b>3.00</b>'));
+	// ?stat= falls back to the first stat for anything it doesn't know.
+	assert.equal(parseTrendStat('nope').key, TREND_STATS[0].key);
+	assert.equal(parseTrendStat(null).key, 'winRate');
+	assert.equal(parseTrendStat('deathsPerFight').key, 'deathsPerFight');
+	assert.equal(resultsText({ results: { win: 1, even: 0, loss: 0, skirmish: 0 } }), '1W 0E 0L');
+});

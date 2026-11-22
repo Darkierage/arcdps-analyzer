@@ -20,7 +20,7 @@ from .. import __version__, diagnostics, paths
 from ..config import FightMode
 from ..detectors import registry
 from ..ingest.recorder import iter_logs
-from ..metrics.aggregate import aggregate_session
+from ..metrics.aggregate import aggregate_session, session_trend
 from ..notes import templates
 from ..state import AppState
 from ..store.files import remove_fight_files
@@ -246,6 +246,11 @@ def create_app(state: AppState) -> FastAPI:
             raise HTTPException(400, "Stop recording before deleting this session")
         remove_fight_files(state.db.delete_session(session_id), state.db)
         return {"ok": True}
+
+    @app.get("/api/trends")
+    def trends() -> dict[str, Any]:
+        """One row per session with analyzed fights, oldest first (the Trends page)."""
+        return {"sessions": session_trend(state.db.trend_sessions())}
 
     # ---- fights -----------------------------------------------------------------------
     @app.get("/api/fights")

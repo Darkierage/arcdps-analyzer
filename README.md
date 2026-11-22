@@ -32,6 +32,9 @@ A local desktop app for Guild Wars 2 **WvW (zerg) fights**. It turns arcdps logs
     boons lost, damage, downs, deaths, distance to tag) for the squad, a party or a player, with
     the squad's average player as a reference line. Click a fight to open it (for a player: at
     their boons). Click a name in a session stat table to see that player's trend.
+- **Trends.** One point per session, oldest to newest: win rate, K/D or squad deaths per
+  fight, with a table of every session's results and its top recurring problem. Click a
+  session to open it.
 - **An in-game overlay (optional).** A small window inside Guild Wars 2 with the latest fight's
   notes and the session summary, so you don't have to alt-tab. It's a Raidcore Nexus addon,
   installed from Settings.

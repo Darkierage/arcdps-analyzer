@@ -48,6 +48,9 @@ CREATE TABLE IF NOT EXISTS analyses (
 """
 
 ACTIVE_STATUSES = ("queued", "parsing", "analyzing")
+# A session's analyzed fights in time order. Shared by the session summary and the Trends
+# page: the summary's ranking of problems depends on the order, so the two must not differ.
+FIGHT_ORDER = "f.fight_start, f.id"
 
 
 def _now() -> str:
@@ -297,7 +300,7 @@ class Database:
         rows = self._all(
             f"""SELECT {cols} FROM fights f
                JOIN analyses a ON a.fight_id = f.id
-               WHERE f.session_id=? AND f.status='done' ORDER BY f.fight_start""",
+               WHERE f.session_id=? AND f.status='done' ORDER BY {FIGHT_ORDER}""",
             (session_id,))
         out = []
         for r in rows:
@@ -307,6 +310,32 @@ class Database:
                 item["players"] = json.loads(r["players"])
             out.append(item)
         return out
+
+    def trend_sessions(self) -> list[dict[str, Any]]:
+        """Every session with analyzed fights, oldest first (by its first fight), each with
+        `items`: its fights' summaries and notes, as `session_analyses(players=False)` and in
+        the same order (the session summary breaks ties between problems by fight order)."""
+        rows = self._all(
+            f"""SELECT s.id AS session_id, s.name, s.kind, s.started_at,
+                      f.id, f.fight_start, f.summary, a.notes
+               FROM sessions s
+               JOIN fights f ON f.session_id = s.id
+               JOIN analyses a ON a.fight_id = f.id
+               WHERE f.status='done' AND f.summary IS NOT NULL
+               ORDER BY {FIGHT_ORDER}""")
+        sessions: dict[int, dict[str, Any]] = {}
+        for r in rows:
+            s = sessions.setdefault(r["session_id"], {
+                "id": r["session_id"], "name": r["name"], "kind": r["kind"],
+                "start": None, "started_at": r["started_at"], "items": []})
+            # Fights without a start time sort first, so take the first start there is.
+            s["start"] = s["start"] or r["fight_start"]
+            s["items"].append({"id": r["id"], "summary": json.loads(r["summary"]),
+                               "notes": json.loads(r["notes"]) if r["notes"] else None})
+        for s in sessions.values():
+            s["start"] = s["start"] or s["started_at"]
+            del s["started_at"]
+        return sorted(sessions.values(), key=lambda s: (s["start"] or "", s["id"]))
 
     def analysis_notes(self, fight_id: int) -> dict[str, Any] | None:
         """Notes and debrief without unpacking the stats blob (the overlay's poll)."""

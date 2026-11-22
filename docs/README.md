@@ -28,6 +28,8 @@
       and second review fixes (2026-11-21)
   12. [`12-session-stats.md`](plans/12-session-stats.md) — session stat tabs, session trend and
       per-player charts (2026-11-21)
+  13. [`13-trends-first-slice.md`](plans/13-trends-first-slice.md) - Trends across sessions,
+      first slice: results per session (2026-11-22)
 
 Each plan starts with a status line saying whether it was implemented and where the
 implementation deviated. New larger features get the next numbered plan once it is approved,
