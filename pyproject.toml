@@ -1,6 +1,6 @@
 [project]
 name = "wvw-analyzer"
-version = "0.6.0"
+version = "0.6.1"
 description = "Guild Wars 2 arcdps WvW fight analyzer: stats, diagnosis and improvement notes"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
