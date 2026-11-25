@@ -1,6 +1,7 @@
 # WvW Analyzer: in-game overlay redesign plan
 
-> **Status:** approved 2026-11-25, not implemented yet.
+> **Status:** approved 2026-11-25, amended after a plan review the same day (debriefs survive a
+> version bump, tiles that don't fit, fonts in practice, small-panel rules); not implemented yet.
 
 ## Context
 
@@ -43,8 +44,12 @@ where they differ.
   major, minor, context, and by impact inside each. The merge step before it is unchanged.
 - The top five and `more` follow the new order, so which five are kept can only change between
   minor and context notes. `summary.topIssue` and `topSeverity` follow too.
-- `ANALYZER_VERSION` goes to 8; stored fights are re-analyzed on startup. A stored LLM debrief
-  is dropped by the existing rule when its notes changed.
+- `ANALYZER_VERSION` goes to 8; stored fights are re-analyzed on startup.
+- **Debriefs survive a version bump.** The keep rule in `store/db.py` compared the whole
+  summary, which carries `analyzerVersion`, so every bump dropped every stored debrief (and
+  auto-debrief only rewrites the latest recording session). The comparison now leaves
+  `analyzerVersion` out: a debrief is dropped only when its notes or the other summary fields
+  changed. Covered by a test. (Added in the plan review.)
 - The app's fight page and the LLM prompt take the order as given; neither changes. The prompt
   text is untouched, so no benchmark run is needed.
 
@@ -97,23 +102,36 @@ added, so an older addon keeps working, and the new addon falls back to `title` 
   `#6fdc8c` / `#5fd47a` at 16%. Results use the same green, red and yellow. Severity is always
   written as a word too, never shown by color alone.
 - **Type.** Inter (SIL Open Font License, bundled with its license file): Regular 12 and 13;
-  SemiBold 11 (chips and section labels, upper case), 13 (card titles), 15 (heading) and 18
-  (stat values). Sizes are multiplied by Nexus's UI scale. Until Nexus hands a font over, the
-  current font is used. Glyphs: Latin and Latin Extended.
+  SemiBold 11 (chips, badges and section labels, upper case), 13 (card titles, open or closed,
+  and the small panel's headline), 15 (heading and the empty-state titles) and 18 (stat
+  values). The mockups' Medium, Bold and 14 px map onto these. Sizes are multiplied by Nexus's
+  UI scale. Until Nexus hands a font over, the current font is used. Glyphs: Latin and Latin
+  Extended.
+- **Fonts in practice.** The static `Inter-Regular.ttf` and `Inter-SemiBold.ttf` (ImGui 1.80
+  ignores a variable font's axes). The OFL text ships in the repo and with the installer. Nexus
+  hands back a raw `ImFont` pointer, which imgui-rs's `FontId` can't wrap, so fonts are pushed
+  with `imgui::sys::igPushFont`/`igPopFont`; the preview uses the same path with its own atlas.
+  A UI scale change calls `resize_font` for each font. Fonts are added with
+  `FontDataOwnedByAtlas = false`, so ImGui never frees the bytes embedded in the DLL.
 - **Metrics**, in font-size units so they follow the scale: window padding 12, card padding
   10 by 12, radius 6 (chips 4), 6 between cards, four equal stat tiles with a 6 gap.
+- **Stat tiles that don't fit** (a record like `4W 2L 1E 1S`, `15 vs 15` at 360 wide): a
+  tile's note goes on its label line ("Squad · +2 allies"); a value still too wide for its tile
+  drops to the 15 heading size, and only then is clipped.
 - **Window.** No native title bar. A header row carries the name, the queue state
-  ("Analyzing (2 queued)"), the recording state with Start/Stop, and Close. Default size 460
-  by 600 (existing users keep their saved size), minimum 360 by 200. The header, the tab
-  switch and the result block stay put; the list under them scrolls.
+  ("Analyzing (2 queued)"), the recording state with Start/Stop, and Close. Without the app
+  the header shows "Not connected" with a gray dot and no Start/Stop. Default size 460 by 600
+  (existing users keep their saved size: the window id `###wvw_analyzer` stays), minimum 360
+  by 200. The header, the tab switch and the result block stay put; the list under them
+  scrolls.
 
 ### 5. Fight tab
 
 - Tab switch (Fight, Session) on the left; older, "Fight n of N", newer and **Latest** on the
   right, with today's rules.
 - Result block: badge, heading, meta, then the stat tiles.
-- A section label with the count (`issuesTitle`), or the framing line when the analyzer sends
-  one ("Clean win, only small things to tidy up:").
+- A section label (`issuesTitle`) with the number of cards shown, or the framing line when the
+  analyzer sends one ("Clean win, only small things to tidy up:").
 - One card per issue: severity chip, title, the fact, a line, then "NEXT TIME" and the fix.
   - Critical and major cards start open. Minor and context cards start as one line (chip,
     title, chevron). If a fight has nothing serious, its first card starts open.
@@ -124,6 +142,7 @@ added, so an older addon keeps working, and the new addon falls back to `title` 
 - "N more in the app" under the cards when `moreCount` is above zero.
 - "WENT WELL" with one card per positive (green dot, title, fact).
 - The LLM debrief stays a closed row at the bottom, with today's "couldn't be checked" note.
+  It is the last item inside the scrolling list, so it can open.
 - States: app not running, a problem message from the app, no analyzed fights yet. Each is a
   centered title with one muted line under it.
 
@@ -146,6 +165,9 @@ added, so an older addon keeps working, and the new addon falls back to `title` 
 - It shows when a new fight has been analyzed (today's `NewFights` rule), the player is out of
   combat and the full window is closed. It hides when combat starts, on dismiss, and on Open
   debrief, which opens the full window on the newest fight. A newer fight replaces its content.
+- It shows only once the payload's fight is the newest one (no flash of the fight before). It
+  also hides when the full window opens. A hide by combat or dismiss is for that fight: the
+  panel doesn't come back after combat, only for a newer fight.
 - With the full window open, a new fight only moves it to the newest fight, as today.
 - **Setting** "After a fight": show the small panel (default), open the full window, or do
   nothing. It replaces "Show the window when a new fight is analyzed": a saved `false` becomes
@@ -164,7 +186,9 @@ added, so an older addon keeps working, and the new addon falls back to `title` 
 
 1. **Order.** The ranker change with a test (a major with more impact than a critical; a
    context note with more impact than a minor), `ANALYZER_VERSION` 8, and a before/after
-   snapshot of `data/dev_corpus`: only the order of notes and the top issue may differ.
+   snapshot of `data/dev_corpus`: only the order of notes, which minor and context notes make
+   the top five (versus `more`), `topIssue`, `topSeverity` and `analyzerVersion` may differ.
+   The debrief keep rule ignores `analyzerVersion`, with a test.
 2. **Payload.** The new fields, `tests/test_overlay_api.py` (zerg and GvG facts, the strip,
    worst severity, the old fields still present), the fixture regenerated.
 3. **Groundwork.** The direct `arcdps-imgui` dependency, the `view` and glue split with no
