@@ -30,6 +30,8 @@
       per-player charts (2026-11-21)
   13. [`13-trends-first-slice.md`](plans/13-trends-first-slice.md) - Trends across sessions,
       first slice: results per session (2026-11-22)
+  14. [`14-player-improvement.md`](plans/14-player-improvement.md) — personal improvement
+      ("My play"): per-player recap and profile from the logs (2026-11-25, not implemented yet)
 
 Each plan starts with a status line saying whether it was implemented and where the
 implementation deviated. New larger features get the next numbered plan once it is approved,
