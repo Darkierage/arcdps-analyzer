@@ -136,3 +136,72 @@ def test_contract_fixture_matches_payload(tmp_path: Path):
         FIXTURE.write_text(json.dumps(payload, indent=2) + "\n")
     stored = json.loads(FIXTURE.read_text())
     assert shape(stored) == shape(payload), "run with UPDATE_FIXTURES=1 and update the addon"
+
+
+def test_result_block_facts_and_strip(tmp_path: Path):
+    client, state = make_client(tmp_path)
+    with client:
+        sid = state.db.create_session("Raid", "recording")
+        lost = add_fight(state, sid, "a", downs_at=[30, 30.5, 31, 31.5])
+        newest = add_fight(state, sid, "b")
+        p = client.get("/api/overlay", params={"fight": lost}).json()
+        f = p["fight"]
+        # The old fields stay for older addons.
+        assert f["title"] and f["resultLine"].startswith("Result: loss")
+        assert f["badge"] == "LOSS" and f["heading"] == "Seared Borderlands"
+        assert f["meta"] == "20:00 · 1:00 long"
+        assert [(x["label"], x["value"], x["tone"]) for x in f["facts"]] == [
+            ("Kills", "0", "good"), ("Deaths", "4", "bad"), ("Squad", "10", ""),
+            ("Enemies", "20", "")]
+        assert f["headline"] == "0 kills for 4 deaths" and f["numbers"] == "10 vs 20"
+        assert f["issuesTitle"] == "Why this fight was lost"
+        assert f["moreCount"] == 0
+        strip = p["session"]["strip"]
+        assert [x["id"] for x in strip] == [lost, newest]  # oldest first
+        assert strip[0] == {"id": lost, "result": "loss", "letter": "L"}
+
+
+def test_gvg_facts_count_only_round_kills(tmp_path: Path):
+    from test_gvg import _round_with_left_enemy_downs
+
+    client, state = make_client(tmp_path)
+    with client:
+        sid = state.db.create_session("GvG", "recording")
+        fid = state.db.add_fight("/x/g.zevtc", sid, 0)
+        a = analyze_ei(_round_with_left_enemy_downs(), "g", Settings(), mode="gvg")
+        state.db.save_analysis(fid, a.summary, a.stats, a.notes)
+        f = client.get("/api/overlay").json()["fight"]
+        s = a.summary
+        assert f["badge"] == s["result"].upper()  # one round: no score
+        labels = [x["label"] for x in f["facts"]]
+        assert labels == ["Rounds", "Kills", "Deaths", "Players"]
+        kills = s["enemyDeaths"] - s["enemyDeathsLate"]
+        assert f["facts"][1]["value"] == str(kills)
+        assert f["facts"][3]["value"] == f"{s['squadInFight']} vs {s['enemyCount']}"
+        assert f["meta"].endswith(f"{overlay_mmss(s['fightS'])} long")
+
+
+def overlay_mmss(seconds: float) -> str:
+    from wvw_analyzer.api.overlay import _mmss
+
+    return _mmss(seconds)
+
+
+def test_session_problems_carry_their_worst_severity(tmp_path: Path):
+    from wvw_analyzer.api.overlay import _worst
+    from wvw_analyzer.metrics.aggregate import aggregate_session
+
+    assert _worst([{"severity": "minor"}, {"severity": "critical"}, {"severity": "major"}],
+                  "minor") == "critical"
+    assert _worst([], "major") == "major"
+    client, state = make_client(tmp_path)
+    with client:
+        sid = state.db.create_session("Raid", "recording")
+        add_fight(state, sid, "a", downs_at=[30, 30.5, 31, 31.5])
+        add_fight(state, sid, "b", downs_at=[20, 21, 40, 41])
+        add_fight(state, sid, "c")
+        problems = client.get("/api/overlay").json()["session"]["problems"]
+        agg = aggregate_session(state.db.session_analyses(sid, players=False), detail=False)
+        for p, r in zip(problems, agg["recurringIssues"], strict=False):
+            assert p["title"] == r["title"]
+            assert p["severity"] == _worst(r["occurrences"], r["severity"])

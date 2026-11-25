@@ -83,6 +83,16 @@ pub struct Session {
     pub strengths: Vec<Strength>,
     pub recording: bool,
     pub latest_id: Option<i64>,
+    /// The session's analyzed fights, oldest first (empty from an app before 0.7.0).
+    pub strip: Vec<StripFight>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct StripFight {
+    pub id: i64,
+    pub result: Option<String>,
+    pub letter: String,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -118,6 +128,33 @@ pub struct Fight {
     pub count: u32,
     pub prev_id: Option<i64>,
     pub next_id: Option<i64>,
+    // From 0.7.0; empty from an older app, which falls back to `title` and `result_line`.
+    pub badge: String,
+    pub heading: String,
+    pub meta: String,
+    pub facts: Vec<Fact>,
+    pub headline: String,
+    pub numbers: String,
+    pub issues_title: String,
+    /// How many issues the app shows beyond the ones sent.
+    pub more_count: u32,
+}
+
+impl Fight {
+    /// Whether the app sent the result block (0.7.0 and newer).
+    pub fn has_header(&self) -> bool {
+        !self.badge.is_empty()
+    }
+}
+
+/// One stat tile: "73" over "Kills". `tone` is "good", "bad" or empty.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Fact {
+    pub label: String,
+    pub value: String,
+    pub note: String,
+    pub tone: String,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -214,9 +251,25 @@ mod tests {
         assert!(!f.issues.is_empty() && !f.issues[0].title.is_empty());
         let latest = o.latest.expect("latest");
         assert!(latest.id == f.id && !latest.added_at.is_empty());
+        assert!(f.has_header() && f.facts.len() == 4 && !f.issues_title.is_empty());
+        assert!(!f.headline.is_empty() && !f.numbers.is_empty() && !f.meta.is_empty());
         let s = o.session.expect("session");
         assert_eq!(s.latest_id, Some(f.id));
         assert!(!s.problems.is_empty());
+        assert_eq!(s.strip.len() as u32, s.fights);
+        assert_eq!(s.strip.last().map(|x| x.id), Some(f.id));
+    }
+
+    #[test]
+    fn an_older_app_without_the_new_fields_still_parses() {
+        let o = Overlay::parse(
+            r#"{"schema":1,"fight":{"id":3,"title":"20:00  EBG  1:00","resultLine":"Result: win"},
+                "session":{"id":1,"fights":2}}"#,
+        )
+        .unwrap();
+        let f = o.fight.unwrap();
+        assert!(!f.has_header() && f.facts.is_empty() && f.more_count == 0);
+        assert!(o.session.unwrap().strip.is_empty());
     }
 
     #[test]

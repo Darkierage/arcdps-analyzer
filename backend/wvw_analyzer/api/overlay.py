@@ -17,6 +17,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from .. import __version__, addon_install
+from ..detectors.base import SEVERITY_ORDER
 from ..llm.prompts import framing_line, result_line
 from ..metrics.aggregate import aggregate_session
 from ..state import AppState
@@ -26,6 +27,9 @@ SCHEMA = 1
 MAX_PROBLEMS = 5
 MAX_STRENGTHS = 3
 RESULT_LETTER = {"win": "W", "loss": "L", "even": "E", "skirmish": "S"}
+RESULT_WORD = {"win": "WIN", "loss": "LOSS", "even": "EVEN", "skirmish": "SKIRMISH"}
+# The same wording as the app's fight page.
+ISSUES_TITLE = {"loss": "Why this fight was lost", "win": "What to improve"}
 
 
 def _clock(start: str | None) -> str:
@@ -48,6 +52,65 @@ def _record(results: dict[str, int]) -> str:
 def _note(f: dict[str, Any]) -> dict[str, Any]:
     return {"severity": f["severity"], "title": f.get("title") or f["detector"],
             "short": f.get("short") or f.get("cause") or "", "fix": f.get("fix_short") or ""}
+
+
+def _plural(count: Any, word: str) -> str:
+    return f"{count} {word}{'' if count == 1 else 's'}"
+
+
+def _counted(s: dict[str, Any], key: str) -> int:
+    """GvG counts only kills and deaths inside a round, as its result line does (zerg: all)."""
+    return int(s.get(key) or 0) - int(s.get(f"{key}Late") or 0)
+
+
+def _fight_header(s: dict[str, Any]) -> dict[str, Any]:
+    """The result block and the small panel's lines, all written here."""
+    if not s:
+        return {}
+    gvg = s.get("mode") == "gvg"
+    result = s.get("result")
+    rounds = s.get("rounds") or []
+    wins, losses = s.get("roundWins", 0), s.get("roundLosses", 0)
+    badge = RESULT_WORD.get(result or "", "")
+    if gvg and len(rounds) > 1 and badge:
+        badge += f" {wins}-{losses}"
+    kills, deaths = _counted(s, "enemyDeaths"), _counted(s, "squadDeaths")
+    squad = s.get("squadInFight") or s.get("squadCount") or 0
+    allies = s.get("allyCount") or 0
+    ally_note = f"+{_plural(allies, 'ally').replace('allys', 'allies')}" if allies else ""
+    enemies = s.get("enemyCount") or 0
+    if gvg:
+        facts = [
+            {"label": "Rounds", "value": f"{wins}-{losses}", "note": "",
+             "tone": "good" if wins > losses else "bad" if losses > wins else ""},
+            {"label": "Kills", "value": str(kills), "note": "", "tone": "good"},
+            {"label": "Deaths", "value": str(deaths), "note": "", "tone": "bad"},
+            {"label": "Players", "value": f"{squad} vs {enemies}", "note": ally_note,
+             "tone": ""},
+        ]
+    else:
+        facts = [
+            {"label": "Kills", "value": str(kills), "note": "", "tone": "good"},
+            {"label": "Deaths", "value": str(deaths), "note": "", "tone": "bad"},
+            {"label": "Squad", "value": str(squad), "note": ally_note, "tone": ""},
+            {"label": "Enemies", "value": str(enemies), "note": "", "tone": ""},
+        ]
+    length = s.get("fightS") if gvg else s.get("durationS")
+    return {
+        "badge": badge,
+        "heading": s.get("map") or "WvW",
+        "meta": f"{_clock(s.get('start'))} · {_mmss(length or s.get('durationS'))} long",
+        "facts": facts,
+        "headline": f"{_plural(kills, 'kill')} for {_plural(deaths, 'death')}",
+        "numbers": f"{squad}{f'+{allies}' if allies else ''} vs {enemies}",
+        "issuesTitle": ISSUES_TITLE.get(result or "", "Key issues"),
+    }
+
+
+def _worst(occurrences: list[dict[str, Any]], fallback: str) -> str:
+    """The most severe severity a recurring problem had in any of its fights."""
+    seen = [o["severity"] for o in occurrences if o.get("severity") in SEVERITY_ORDER]
+    return min(seen, key=SEVERITY_ORDER.__getitem__) if seen else fallback
 
 
 def _session_id(state: AppState) -> int | None:
@@ -80,7 +143,9 @@ def _fight_block(state: AppState, fight_id: int, done: list[dict[str, Any]]) -> 
         "title": f"{_clock(s.get('start'))}  {s.get('map') or 'WvW'}  {_mmss(s.get('durationS'))}",
         "resultLine": result_line(s) if s else "",
         "framing": framing_line(s, notes) if s else None,
+        **_fight_header(s),
         "issues": [_note(n) for n in notes.get("issues", [])],
+        "moreCount": len(notes.get("more", [])),
         "positives": [_note(n) for n in notes.get("positives", [])],
         "debrief": [ln for ln in (debrief or "").splitlines() if ln.strip()],
         "debriefUnverified": len(unverified),
@@ -91,7 +156,8 @@ def _fight_block(state: AppState, fight_id: int, done: list[dict[str, Any]]) -> 
     }
 
 
-def _session_block(state: AppState, session_id: int) -> dict[str, Any]:
+def _session_block(state: AppState, session_id: int,
+                   done: list[dict[str, Any]]) -> dict[str, Any]:
     sess = state.db.session(session_id) or {}
     agg = aggregate_session(state.db.session_analyses(session_id, players=False), detail=False)
     t = agg["totals"]
@@ -104,10 +170,15 @@ def _session_block(state: AppState, session_id: int) -> dict[str, Any]:
         "deaths": t["squadDeaths"],
         "kdr": t["kdr"],
         "duration": _mmss(t["durationS"]),
-        "problems": [{"title": p["title"], "severity": p["severity"], "count": p["count"],
-                      "losses": p["losses"]} for p in agg["recurringIssues"][:MAX_PROBLEMS]],
+        "problems": [{"title": p["title"], "severity": _worst(p["occurrences"], p["severity"]),
+                      "count": p["count"], "losses": p["losses"]}
+                     for p in agg["recurringIssues"][:MAX_PROBLEMS]],
         "strengths": [{"title": p["title"], "count": p["count"]}
                       for p in agg["positives"][:MAX_STRENGTHS]],
+        # Every analyzed fight, oldest first: the addon draws one square per fight.
+        "strip": [{"id": r["id"], "result": r.get("result"),
+                   "letter": RESULT_LETTER.get(r.get("result") or "", "?")}
+                  for r in reversed(done)],
     }
 
 
@@ -141,7 +212,7 @@ def build_overlay(state: AppState, fight_id: int | None = None) -> dict[str, Any
     if session_id is None:
         return payload
     done = current_done if session_id == current else _done_fights(state, session_id)
-    payload["session"] = _session_block(state, session_id)
+    payload["session"] = _session_block(state, session_id, done)
     payload["session"]["recording"] = rec["sessionId"] == session_id
     # Newest fight of this session (addons from 0.5.0 used it; newer ones read `latest`).
     payload["session"]["latestId"] = done[0]["id"] if done else None
