@@ -73,6 +73,19 @@ def test_reanalysis_keeps_the_debrief_only_if_nothing_changed(tmp_path: Path):
     assert db.analysis(fid)["debrief"] is None
 
 
+def test_a_version_bump_alone_keeps_the_debrief(tmp_path: Path):
+    db = Database(tmp_path / "t.db")
+    fid = db.add_fight("/x/a.zevtc", None, 0)
+    a = analyze_ei(zerg(10), "a", Settings())
+    db.save_analysis(fid, a.summary, a.stats, a.notes)
+    db.save_debrief(fid, "Result: win\n- old")
+    bumped = {**a.summary, "analyzerVersion": a.summary["analyzerVersion"] + 1}
+    db.save_analysis(fid, bumped, a.stats, a.notes)  # same notes and facts: still valid
+    assert db.analysis(fid)["debrief"]
+    db.save_analysis(fid, {**bumped, "topIssue": "Something else"}, a.stats, a.notes)
+    assert db.analysis(fid)["debrief"] is None
+
+
 # ---- second instance ------------------------------------------------------------------------
 def test_second_launch_finds_an_instance_on_a_later_port(monkeypatch):
     busy = {8765: "other", 8766: "ours"}

@@ -16,7 +16,7 @@ from .notes.templates import render
 
 # Bump when analysis output changes (new columns, detector fixes); stored fights with another
 # version are re-analyzed on startup.
-ANALYZER_VERSION = 7  # 7: per-row series keys, clamped down/dead intervals
+ANALYZER_VERSION = 8  # 8: notes strictly by severity, then impact
 
 
 class Skipped(Exception):
