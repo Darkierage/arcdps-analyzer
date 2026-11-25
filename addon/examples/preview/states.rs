@@ -40,17 +40,21 @@ fn glance(name: &str, v: Value) -> State {
 
 /// A long session: the strip wraps, the record has every result.
 fn many() -> Value {
+    many_with(40)
+}
+
+fn many_with(fights: usize) -> Value {
     let mut v = win();
     let s = &mut v["session"];
     let results = ["win", "loss", "even", "skirmish"];
-    let strip: Vec<Value> = (0..40)
+    let strip: Vec<Value> = (0..fights)
         .map(|i| {
             let r = results[(i * 7 + i / 3) % 4];
             json!({"id": i + 1, "result": r, "letter": &r[..1].to_uppercase()})
         })
         .collect();
     s["strip"] = json!(strip);
-    s["fights"] = json!(40);
+    s["fights"] = json!(fights);
     s["record"] = json!("21W 12L 5E 2S");
     s["kills"] = json!(1874);
     s["deaths"] = json!(1203);
@@ -292,6 +296,12 @@ pub fn all() -> Vec<State> {
             v
         }),
         main_window("session-360", [360.0, 600.0], connected(many()), {
+            let mut v = ViewState::default();
+            v.tab = Tab::Session;
+            v
+        }),
+        // A very long session in a short window: the strip scrolls with the lists.
+        main_window("session-90-short", [360.0, 420.0], connected(many_with(90)), {
             let mut v = ViewState::default();
             v.tab = Tab::Session;
             v

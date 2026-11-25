@@ -124,7 +124,8 @@ impl Drop for Pushed {
 }
 
 /// Style for the window itself: no padding (the header band reaches the edges), rounded
-/// corners and the theme's colors. Popped once the window has begun.
+/// corners and the theme's colors. Kept pushed for the whole window (dropped after `build`), so
+/// its child lists' scrollbars use the theme too.
 pub(crate) fn window_style(ui: &Ui, m: &Metrics) -> Pushed {
     Pushed::new(
         ui,

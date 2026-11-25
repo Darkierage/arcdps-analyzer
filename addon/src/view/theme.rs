@@ -12,6 +12,13 @@ pub const INTER_SEMIBOLD: &[u8] = include_bytes!("../../assets/fonts/Inter-SemiB
 pub static GLYPH_RANGES: [u16; 11] =
     [0x0020, 0x007E, 0x00A0, 0x024F, 0x2010, 0x2027, 0x2030, 0x203A, 0x20AC, 0x20AC, 0];
 
+/// A copy of `data` on the process heap that is never freed. What Nexus keeps a pointer to
+/// (font bytes, glyph ranges, the font config) must outlive this DLL: Nexus may hold a font
+/// after the addon is unloaded or reloaded, and the DLL's static data goes with it.
+pub fn leak_copy<T: Copy>(data: &[T]) -> &'static [T] {
+    Box::leak(data.to_vec().into_boxed_slice())
+}
+
 const fn hex(rgb: u32) -> [f32; 4] {
     [
         ((rgb >> 16) & 0xff) as f32 / 255.0,
@@ -208,5 +215,20 @@ impl Metrics {
     /// A background color at the opacity setting.
     pub fn bg(&self, c: [f32; 4]) -> [f32; 4] {
         [c[0], c[1], c[2], c[3] * self.bg_alpha]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn heap_copies_hold_the_same_bytes_outside_the_dll_statics() {
+        let copy = leak_copy(INTER_REGULAR);
+        assert_eq!(copy, INTER_REGULAR);
+        assert_ne!(copy.as_ptr(), INTER_REGULAR.as_ptr());
+        let ranges = leak_copy(&GLYPH_RANGES);
+        assert_eq!(ranges.last(), Some(&0)); // still zero-terminated for ImGui
+        assert_ne!(ranges.as_ptr(), GLYPH_RANGES.as_ptr());
     }
 }

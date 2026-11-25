@@ -66,14 +66,21 @@ fn ui_scale() -> f32 {
 /// Hands Inter to Nexus at each size of the type scale. Nexus adds them to its atlas and calls
 /// back with each `ImFont`; until then the view keeps the current font.
 fn register_fonts(scale: f32) {
-    // SAFETY: ImGui's own constructor; the config is leaked on purpose, as Nexus may read it
-    // when it rebuilds the atlas later. The font bytes are static, so the atlas must not own
-    // (and free) them; the glyph ranges are static too.
-    let config = unsafe {
+    // Everything Nexus keeps a pointer to is a heap copy that is never freed (about 80 KB per
+    // load): Nexus may rebuild its atlas from it after this DLL is unloaded or reloaded. The atlas
+    // must not own (and free) the font bytes.
+    let regular = theme::leak_copy(theme::INTER_REGULAR);
+    let semibold = theme::leak_copy(theme::INTER_SEMIBOLD);
+    let ranges = theme::leak_copy(&GLYPH_RANGES);
+    // SAFETY: ImGui's constructor sets the defaults; the struct is copied into a leaked Box and
+    // ImGui's own allocation is destroyed right away.
+    let config: &'static sys::ImFontConfig = unsafe {
         let raw = sys::ImFontConfig_ImFontConfig();
-        (*raw).FontDataOwnedByAtlas = false;
-        (*raw).GlyphRanges = GLYPH_RANGES.as_ptr();
-        &*raw
+        let mut copy = std::ptr::read(raw);
+        sys::ImFontConfig_destroy(raw);
+        copy.FontDataOwnedByAtlas = false;
+        copy.GlyphRanges = ranges.as_ptr();
+        Box::leak(Box::new(copy))
     };
     let receive = font_receive!(|id, font| {
         if let Some(f) = Font::from_id(id) {
@@ -81,7 +88,8 @@ fn register_fonts(scale: f32) {
         }
     });
     for f in Font::ALL {
-        add_font_from_memory(f.id(), f.data(), f.size() * scale, Some(config), receive)
+        let data = if f.semibold() { semibold } else { regular };
+        add_font_from_memory(f.id(), data, f.size() * scale, Some(config), receive)
             .revert_on_unload();
     }
     FONT_SCALE.store(scale.to_bits(), Ordering::Relaxed);

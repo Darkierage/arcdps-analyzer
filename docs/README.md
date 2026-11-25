@@ -32,6 +32,8 @@
       first slice: results per session (2026-11-22)
   14. [`14-overlay-redesign.md`](plans/14-overlay-redesign.md) - in-game overlay redesign:
       cards, severity order, a small panel after a fight (2026-11-25)
+  15. [`15-overlay-review-fixes.md`](plans/15-overlay-review-fixes.md) - fixes from the full
+      review of plan 14: session strip scrolls, fonts on the heap, tile values wrap (2026-11-25)
 
 Each plan starts with a status line saying whether it was implemented and where the
 implementation deviated. New larger features get the next numbered plan once it is approved,

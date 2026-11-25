@@ -44,16 +44,15 @@ pub fn tab(ui: &Ui, m: &Metrics, s: &Session, top: f32, frame: &mut Frame, tab: 
     let pos = ui.window_pos();
     let w = ui.window_size()[0] - m.px(24.0);
     let x = pos[0] + m.px(12.0);
-    let mut y = top + m.px(4.0);
-    y += widgets::stat_tiles(ui, m, [x, y], w, &facts(s)) + m.px(10.0);
-    if !s.strip.is_empty() {
-        y += strip(ui, m, s, x, y, w, frame, tab);
-    }
-    ui.set_cursor_screen_pos([pos[0], y + m.px(12.0)]);
+    let y = top + m.px(4.0);
+    // Only the tiles stay put; the strip scrolls with the lists, so a long session or a short
+    // window never pushes the recurring problems out of reach.
+    let h = widgets::stat_tiles(ui, m, [x, y], w, &facts(s));
+    ui.set_cursor_screen_pos([pos[0], y + h + m.px(10.0)]);
     ChildWindow::new("##session_list")
         .size([0.0, 0.0])
         .draw_background(false)
-        .build(ui, || list(ui, m, s));
+        .build(ui, || list(ui, m, s, frame, tab));
 }
 
 /// One small square per fight, oldest first, wrapping onto more lines. Returns the height.
@@ -111,12 +110,15 @@ fn strip(
     rows as f32 * (cell_h + gap) - gap
 }
 
-fn list(ui: &Ui, m: &Metrics, s: &Session) {
+fn list(ui: &Ui, m: &Metrics, s: &Session, frame: &mut Frame, tab: &mut Tab) {
     let start = ui.cursor_screen_pos();
     let x = start[0] + m.px(12.0);
     let w = ui.content_region_avail()[0] - m.px(24.0);
     let mut y = start[1];
     let gap = m.px(6.0);
+    if !s.strip.is_empty() {
+        y += strip(ui, m, s, x, y, w, frame, tab) + m.px(12.0);
+    }
     let (pad_x, pad_y) = (m.px(12.0), m.px(8.0));
     let fights = s.fights.max(1);
     if !s.problems.is_empty() {

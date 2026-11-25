@@ -27,6 +27,15 @@ pub fn text_size(ui: &Ui, font: Font, text: &str) -> [f32; 2] {
 /// Splits `text` into lines no wider than `width` (at word breaks; a single word too long is
 /// cut). Respects line breaks in the text.
 pub fn wrap(ui: &Ui, font: Font, text: &str, width: f32) -> Vec<String> {
+    wrap_with(ui, font, text, width, true)
+}
+
+/// Like [`wrap`], but a word too long for the line stays whole (the caller clips it).
+pub fn wrap_words(ui: &Ui, font: Font, text: &str, width: f32) -> Vec<String> {
+    wrap_with(ui, font, text, width, false)
+}
+
+fn wrap_with(ui: &Ui, font: Font, text: &str, width: f32, cut: bool) -> Vec<String> {
     let _f = theme::font(ui, font);
     let mut out = Vec::new();
     for para in text.split('\n') {
@@ -41,24 +50,36 @@ pub fn wrap(ui: &Ui, font: Font, text: &str, width: f32) -> Vec<String> {
             if !line.is_empty() {
                 out.push(std::mem::take(&mut line));
             }
-            // A word wider than the line: cut it into pieces that fit.
-            let mut rest = word;
-            while ui.calc_text_size(rest)[0] > width && rest.chars().count() > 1 {
-                let mut cut = rest.len();
-                while cut > 0 && ui.calc_text_size(&rest[..cut])[0] > width {
-                    cut = rest[..cut].char_indices().last().map_or(0, |(i, _)| i);
-                }
-                if cut == 0 {
-                    cut = rest.chars().next().map_or(rest.len(), char::len_utf8);
-                }
-                out.push(rest[..cut].to_string());
-                rest = &rest[cut..];
+            if !cut || ui.calc_text_size(word)[0] <= width {
+                line = word.to_string();
+                continue;
             }
-            line = rest.to_string();
+            // A word wider than the line: cut it into pieces that fit, in one pass over its
+            // characters' widths (a long run of LLM text must not cost a frame).
+            let mut start = 0;
+            let mut piece_w = 0.0;
+            for (i, ch) in word.char_indices() {
+                let advance = char_advance(ch);
+                if piece_w + advance > width && i > start {
+                    out.push(word[start..i].to_string());
+                    start = i;
+                    piece_w = 0.0;
+                }
+                piece_w += advance;
+            }
+            line = word[start..].to_string();
         }
         out.push(line);
     }
     out
+}
+
+/// A character's advance in the current font (ImGui 1.80 has no kerning, so a string's width
+/// is the sum of its characters').
+fn char_advance(ch: char) -> f32 {
+    let c = u16::try_from(u32::from(ch)).unwrap_or(u16::from(b'?'));
+    // SAFETY: the current font of the current context, only while drawing a frame.
+    unsafe { sys::ImFont_GetCharAdvance(sys::igGetFont(), c) }
 }
 
 /// Wrapped text, measured before drawing.
@@ -144,7 +165,7 @@ pub fn dot(ui: &Ui, m: &Metrics, center: [f32; 2], color: [f32; 4]) {
     ui.get_window_draw_list().add_circle(center, m.px(4.0), color).filled(true).build();
 }
 
-/// Size of a chip: the word in SemiBold 11 with 7 by 1 padding (a badge: 8 by 2).
+/// Size of a chip: the word in SemiBold 11 with 7 by 2 padding (a badge: 8 by 3).
 pub fn chip_size(ui: &Ui, m: &Metrics, word: &str, badge: bool) -> [f32; 2] {
     let t = text_size(ui, Font::Label11, word);
     let (px, py) = if badge { (8.0, 3.0) } else { (7.0, 2.0) };
@@ -315,7 +336,7 @@ pub fn section_label(
 /// Stat tiles in one row from `pos`, `width` wide; returns the row's height.
 ///
 /// A tile's note goes on its label line ("Squad · +2 allies"). A value too wide for its tile
-/// drops to the heading size, and only then is clipped.
+/// drops to the heading size, then wraps at spaces (see [`tile_value`]).
 pub fn stat_tiles(ui: &Ui, m: &Metrics, pos: [f32; 2], width: f32, facts: &[Fact]) -> f32 {
     if facts.is_empty() {
         return 0.0;
@@ -325,7 +346,8 @@ pub fn stat_tiles(ui: &Ui, m: &Metrics, pos: [f32; 2], width: f32, facts: &[Fact
     let tile_w = ((width - gap * (n - 1.0)) / n).floor();
     let (pad_x, pad_y) = (m.px(10.0), m.px(6.0));
     let inner = (tile_w - pad_x * 2.0).max(1.0);
-    let value_h = line_height(ui, Font::Value18);
+    let values: Vec<Block> = facts.iter().map(|f| tile_value(ui, &f.value, inner)).collect();
+    let value_h = values.iter().map(Block::height).fold(line_height(ui, Font::Value18), f32::max);
     let labels: Vec<Block> = facts
         .iter()
         .map(|f| {
@@ -340,24 +362,27 @@ pub fn stat_tiles(ui: &Ui, m: &Metrics, pos: [f32; 2], width: f32, facts: &[Fact
     let label_h = labels.iter().map(|b| b.lines.len()).max().unwrap_or(1) as f32
         * line_height(ui, Font::Body12);
     let tile_h = pad_y * 2.0 + value_h + label_h;
-    for (i, (f, label)) in facts.iter().zip(&labels).enumerate() {
+    for (i, ((f, value), label)) in facts.iter().zip(&values).zip(&labels).enumerate() {
         let x = pos[0] + i as f32 * (tile_w + gap);
         let max = [x + tile_w, pos[1] + tile_h];
         rect(ui, [x, pos[1]], max, m.bg(theme::CARD), m.px(6.0));
-        let font = if text_size(ui, Font::Value18, &f.value)[0] <= inner {
-            Font::Value18
-        } else {
-            Font::Heading15
-        };
         let color = theme::fact_color(&f.tone);
-        let value = fit(ui, font, &f.value, inner);
-        let vy = pos[1] + pad_y + ((value_h - text_size(ui, font, &value)[1]) / 2.0).floor();
+        // One line sits in the middle of the value row; wrapped lines start at its top.
+        let vy = if value.lines.len() == 1 {
+            pos[1] + pad_y + ((value_h - value.height()) / 2.0).floor()
+        } else {
+            pos[1] + pad_y
+        };
         {
             // One draw list at a time: imgui-rs panics on a second one.
-            let _f = theme::font(ui, font);
+            let _f = theme::font(ui, value.font);
+            let offset = ((value.line_h - font_size()) / 2.0).floor();
             let dl = ui.get_window_draw_list();
             dl.with_clip_rect_intersect([x, pos[1]], [max[0] - pad_x / 2.0, max[1]], || {
-                dl.add_text([(x + pad_x).round(), vy.round()], color, &value);
+                for (k, line) in value.lines.iter().enumerate() {
+                    let ly = vy + offset + k as f32 * value.line_h;
+                    dl.add_text([(x + pad_x).round(), ly.round()], color, line);
+                }
             });
         }
         label.draw(ui, [x + pad_x, pos[1] + pad_y + value_h], theme::MUTED);
@@ -365,21 +390,20 @@ pub fn stat_tiles(ui: &Ui, m: &Metrics, pos: [f32; 2], width: f32, facts: &[Fact
     tile_h
 }
 
-/// `s` as is when it fits in `width`, else cut after its last whole word that fits, with an
-/// ellipsis ("21W 12L 5E…"), so a clipped value never ends mid-letter.
-pub fn fit(ui: &Ui, font: Font, s: &str, width: f32) -> String {
-    let _f = theme::font(ui, font);
-    if ui.calc_text_size(s)[0] <= width {
-        return s.to_string();
-    }
-    let words: Vec<&str> = s.split(' ').collect();
-    for n in (1..words.len()).rev() {
-        let cut = format!("{}…", words[..n].join(" "));
-        if ui.calc_text_size(&cut)[0] <= width {
-            return cut;
+/// How a stat tile's value is set: 18 px on one line; if too wide, 15 px; if still too wide,
+/// 15 px wrapped at spaces onto more lines (`21W 12L` / `5E 2S`). Only a single word too wide
+/// for the tile is clipped.
+pub fn tile_value(ui: &Ui, value: &str, inner: f32) -> Block {
+    for font in [Font::Value18, Font::Heading15] {
+        if text_size(ui, font, value)[0] <= inner {
+            return Block { lines: vec![value.to_string()], font, line_h: line_height(ui, font) };
         }
     }
-    s.to_string() // one word: the clip rectangle cuts it
+    Block {
+        lines: wrap_words(ui, Font::Heading15, value, inner),
+        font: Font::Heading15,
+        line_h: line_height(ui, Font::Heading15),
+    }
 }
 
 /// A thin bar for a share, 0..1.
@@ -391,4 +415,55 @@ pub fn bar(ui: &Ui, m: &Metrics, pos: [f32; 2], width: f32, share: f32, color: [
         rect(ui, pos, [pos[0] + w.max(h), pos[1] + h], color, h / 2.0);
     }
     h
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    /// ImGui allows one context at a time: tests that need one take turns.
+    static CONTEXT: Mutex<()> = Mutex::new(());
+
+    /// Runs `f` inside a frame of a headless ImGui context with the default font.
+    fn in_frame(f: impl FnOnce(&Ui)) {
+        let _turn = CONTEXT.lock().unwrap_or_else(|e| e.into_inner());
+        let mut ctx = imgui::Context::create();
+        ctx.set_ini_filename(None);
+        ctx.io_mut().display_size = [800.0, 600.0];
+        ctx.io_mut().delta_time = 1.0 / 60.0;
+        ctx.fonts().build_alpha8_texture();
+        let ui = ctx.frame();
+        f(&ui);
+        ui.render();
+    }
+
+    #[test]
+    fn a_very_long_word_is_cut_into_fitting_pieces_quickly() {
+        in_frame(|ui| {
+            let word = "ab-ł".repeat(2500); // 10,000 characters, no spaces
+            let started = std::time::Instant::now();
+            let lines = wrap(ui, Font::Body13, &format!("see {word}"), 100.0);
+            // Measuring a prefix per character took seconds for this; one pass takes far less.
+            assert!(started.elapsed() < std::time::Duration::from_millis(500));
+            assert_eq!(lines[0], "see");
+            assert_eq!(lines[1..].concat(), word);
+            for l in &lines {
+                assert!(ui.calc_text_size(l)[0] <= 101.0, "{l:?} too wide");
+            }
+        });
+    }
+
+    #[test]
+    fn a_tile_value_too_wide_wraps_at_spaces() {
+        in_frame(|ui| {
+            let record = tile_value(ui, "21W 12L 5E 2S", 50.0);
+            assert!(record.lines.len() >= 2 && record.font == Font::Heading15);
+            assert_eq!(record.lines.join(" "), "21W 12L 5E 2S"); // nothing hidden
+            let kills = tile_value(ui, "1874", 200.0);
+            assert_eq!((kills.lines.len(), kills.font), (1, Font::Value18));
+            // A single word too wide stays whole; the tile clips it.
+            assert_eq!(tile_value(ui, "123456789012345", 20.0).lines, ["123456789012345"]);
+        });
+    }
 }

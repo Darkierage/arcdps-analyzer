@@ -838,8 +838,16 @@ Plan 14. Players use the overlay most, and it read as flat, compressed text.
   fights (computed in `overlay.py`; the app's session page is unchanged). GvG facts count only
   kills and deaths inside rounds, like its result line. The new addon falls back to `title`
   and `resultLine` with an older app.
-- **The addon stays a dumb renderer.** It writes only labels of its own (tab names, "NEXT
-  TIME", "Fights", "of fighting", the empty states); every fact comes from the app.
+- **The addon stays a dumb renderer.** Every fact comes from the app. The addon writes labels
+  and composes a few lines from the app's numbers, and a wording change there needs an addon
+  update:
+  - labels: the tab names, "NEXT TIME", "WENT WELL", "Fights", "click to open a fight",
+    "Recording", "Not recording", "Not connected", "Start", "Stop", "Latest", "Open debrief",
+    "Debrief, worded by the local LLM", and the empty and error states;
+  - from numbers: the session tiles ("40 fights", Kills, Deaths, KDR with two decimals),
+    "3 of 7 · 2 lost", "4 of 7 fights", "<name> · 48:12 of fighting", "N more in the app",
+    "N more · hides when combat starts", "Fight n of N", "Analyzing (N queued)".
+  (Listing corrected after the review, plan 15.)
 - **Drawing is platform-independent.** `addon/src/view` uses `arcdps-imgui` directly (the same
   0.8.0 with `tables-api` that nexus-rs uses, so the types are shared) and runs on Linux.
   `ui.rs` and `addon.rs` keep the Nexus glue. Decisions that aren't drawing are plain, tested
@@ -863,7 +871,8 @@ Plan 14. Players use the overlay most, and it read as flat, compressed text.
   and pushed with `igPushFont`; until then the current font is used. A change of the game's
   interface size resizes them (`resize_font`).
 - **Tiles that don't fit.** A tile's note goes on its label line ("Squad · +2 allies"); a value
-  too wide drops to 15 px, then is cut after a whole word with an ellipsis.
+  too wide drops to 15 px, then wraps at spaces onto more lines (`21W 12L` / `5E 2S`); only a
+  single word too wide is clipped. (An ellipsis first; it hid the losses at 360 wide. Plan 15.)
 - **Small panel after a fight.** A second window, sized to its content, movable, no focus on
   appearing and no keyboard navigation. It shows once a new fight is analyzed, the player is
   out of combat, the full window is closed and the payload already has the new fight. Combat,
@@ -887,11 +896,36 @@ Plan 14. Players use the overlay most, and it read as flat, compressed text.
     with the mockups by eye (win, loss with a card opened by click, clean win, no fights, app
     not running, a problem, 360 wide, five open cards scrolling, long titles, an older app,
     the session tab with 7 and 40 fights, the small panel).
-  - Known difference: a session record with all four results (`21W 12L 5E 2S`) doesn't fit
-    its tile even at 460 wide and shows as `21W 12L 5E…`.
   - Not yet checked in game: sharp fonts at the UI scale, dragging by the header, the small
     panel without keyboard focus and hiding in combat, scrolling and resizing, the options and
     the settings migration, frame time.
+
+## Overlay redesign: review fixes (2026-11-25)
+
+Plan 15. A full review of plan 14 (performance, security and use cases; Opus reviewers) found
+two medium and four low issues; all are fixed. Analysis output is unchanged.
+
+- **The session strip scrolls (F1).** It sat fixed above the list, so a long session or a short
+  window (90 fights at 360 by 420) left the recurring problems no room at all. Only the tiles
+  stay fixed now, like the fight tab's result block. Decided with the user.
+- **Fonts handed to Nexus live on the heap (F2).** The font bytes (`FontDataOwnedByAtlas =
+  false`), the glyph ranges and the font config pointed into the DLL's static data. If Nexus
+  keeps a font after the addon is unloaded or hot-reloaded, a later atlas rebuild would read
+  freed memory and crash the game. They are now heap copies that are never freed (about
+  80 KB per load). Whether Nexus actually keeps them is unknown (its font manager isn't in this
+  checkout); the copies are safe either way.
+- **Long unspaced words are cut in one pass (F3).** The old cut re-measured each prefix,
+  roughly cubic: a 1,800-character LLM debrief line cost about 11 ms per frame. It now adds up
+  character advances (ImGui 1.80 has no kerning).
+- **Tile values wrap (F4)** instead of the ellipsis, see "Tiles that don't fit". Decided with
+  the user.
+- **The addon-written strings are listed (F5)** under "The addon stays a dumb renderer".
+- **Two wrong comments (F6)**: chip padding, and the window style's lifetime.
+- **Validation.** New Rust tests: a 10,000-character word cut into fitting pieces with nothing
+  lost in under 500 ms (debug build), a too-wide tile value wrapping at spaces, the heap copies
+  holding the same bytes away from the statics. Preview: a 90-fight session at 360 by 420
+  scrolls to its problems; the record wraps at 360 and 460. pytest, ruff, cargo test, clippy for
+  Linux and Windows, the preview and the DLL build pass. Not checked in game.
 
 ## Open items at the time of writing
 
