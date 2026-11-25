@@ -30,6 +30,8 @@
       per-player charts (2026-11-21)
   13. [`13-trends-first-slice.md`](plans/13-trends-first-slice.md) - Trends across sessions,
       first slice: results per session (2026-11-22)
+  14. [`14-overlay-redesign.md`](plans/14-overlay-redesign.md) - in-game overlay redesign:
+      cards, severity order, a small panel after a fight (2026-11-25)
 
 Each plan starts with a status line saying whether it was implemented and where the
 implementation deviated. New larger features get the next numbered plan once it is approved,
