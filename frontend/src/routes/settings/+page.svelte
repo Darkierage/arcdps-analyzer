@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { api, type OverlayAddonStatus, type SettingsResponse } from '#lib/api.ts';
+	import { api, type DetectorInfo, type OverlayAddonStatus, type PlayerInfo, type SettingsResponse } from '#lib/api.ts';
 	import { live, toasts } from '#lib/live.svelte.ts';
 	import Icon from '#lib/components/Icon.svelte';
 	import { copyDiagnostics, openDataFolder } from '#lib/diagnostics.ts';
@@ -17,13 +17,28 @@
 			data = await api.settings();
 			s = $state.snapshot(data.settings);
 			loadedMode = s.fight_mode;
-			det = Object.fromEntries(data.detectors.map((d) => [d.name, { enabled: d.enabled, ...d.config }]));
+			det = Object.fromEntries(allRules(data).map((d) => [d.name, { enabled: d.enabled, ...d.config }]));
 			dirty = false;
 		} catch (e) {
 			toasts.error(e);
 		}
 	}
 	onMount(load);
+
+	/** Fight detectors and the personal rules ("My play"): their overrides share one map. */
+	function allRules(d: SettingsResponse): (DetectorInfo & { enabledByDefault?: boolean })[] {
+		return [...d.detectors, ...(d.personalRules ?? [])];
+	}
+
+	// "My play" opens on this account; the list comes from the analyzed fights.
+	let players = $state<PlayerInfo[]>([]);
+	onMount(async () => {
+		try {
+			players = (await api.players()).players;
+		} catch {
+			/* the picker just stays empty */
+		}
+	});
 
 	// In-game overlay (Nexus addon). The folder is a normal setting (s.gw2_dir); installing
 	// stores it too, so the main Save never brings back an old value.
@@ -57,10 +72,11 @@
 		try {
 			// Only store detector values that differ from defaults.
 			const detectors: Record<string, any> = {};
-			for (const d of data!.detectors) {
+			for (const d of allRules(data!)) {
 				const cur = det[d.name];
 				const diff: Record<string, any> = {};
-				if (!cur.enabled) diff.enabled = false;
+				// Some personal rules are off unless turned on; store only a change from that.
+				if (cur.enabled !== (d.enabledByDefault ?? true)) diff.enabled = cur.enabled;
 				for (const [k, v] of Object.entries(d.defaults)) {
 					// A cleared field (null in Svelte 5) means "use the default", not 0.
 					if (cur[k] === null || cur[k] === undefined || cur[k] === '') continue;
@@ -99,8 +115,8 @@
 	}
 
 	function resetDetector(name: string) {
-		const d = data!.detectors.find((x) => x.name === name)!;
-		det[name] = { enabled: true, ...d.defaults };
+		const d = allRules(data!).find((x) => x.name === name)!;
+		det[name] = { enabled: d.enabledByDefault ?? true, ...d.defaults };
 		dirty = true;
 	}
 
@@ -113,6 +129,32 @@
 		diagBusy = false;
 	}
 </script>
+
+{#snippet ruleRow(d: DetectorInfo)}
+					{@const cur = det[d.name]}
+					<details class="group rounded-lg border border-line bg-panel-2">
+						<summary class="flex cursor-pointer list-none items-center gap-3 px-4 py-3">
+							<input type="checkbox" class="accent-accent" bind:checked={cur.enabled} onclick={(e) => e.stopPropagation()} />
+							<div class="min-w-0 flex-1">
+								<div class="text-sm font-medium {cur.enabled ? '' : 'text-faint line-through'}">{d.label}</div>
+								<div class="truncate text-xs text-faint">{d.description}</div>
+							</div>
+							<Icon name="chevron" class="size-4 text-faint transition group-open:rotate-90" />
+						</summary>
+						<div class="grid grid-cols-2 gap-3 border-t border-line px-4 py-3 md:grid-cols-3">
+							{#each Object.keys(d.defaults) as k}
+								<div>
+									<label class="label normal-case" for="{d.name}-{k}">{k.replaceAll('_', ' ')}</label>
+									<input id="{d.name}-{k}" class="input" type="number" step="any" bind:value={cur[k]} />
+									{#if cur[k] !== d.defaults[k]}<p class="mt-0.5 text-[11px] text-faint">default {d.defaults[k]}</p>{/if}
+								</div>
+							{/each}
+							<div class="col-span-full">
+								<button class="text-xs text-accent hover:underline" onclick={() => resetDetector(d.name)}>Reset to defaults</button>
+							</div>
+						</div>
+					</details>
+{/snippet}
 
 <!-- Same page container as everywhere else; the form itself stays a readable width. -->
 <div class="page" oninput={() => (dirty = true)} onchange={() => (dirty = true)}>
@@ -215,29 +257,35 @@
 			</p>
 			<div class="space-y-3">
 				{#each data.detectors as d (d.name)}
-					{@const cur = det[d.name]}
-					<details class="group rounded-lg border border-line bg-panel-2">
-						<summary class="flex cursor-pointer list-none items-center gap-3 px-4 py-3">
-							<input type="checkbox" class="accent-accent" bind:checked={cur.enabled} onclick={(e) => e.stopPropagation()} />
-							<div class="min-w-0 flex-1">
-								<div class="text-sm font-medium {cur.enabled ? '' : 'text-faint line-through'}">{d.label}</div>
-								<div class="truncate text-xs text-faint">{d.description}</div>
-							</div>
-							<Icon name="chevron" class="size-4 text-faint transition group-open:rotate-90" />
-						</summary>
-						<div class="grid grid-cols-2 gap-3 border-t border-line px-4 py-3 md:grid-cols-3">
-							{#each Object.keys(d.defaults) as k}
-								<div>
-									<label class="label normal-case" for="{d.name}-{k}">{k.replaceAll('_', ' ')}</label>
-									<input id="{d.name}-{k}" class="input" type="number" step="any" bind:value={cur[k]} />
-									{#if cur[k] !== d.defaults[k]}<p class="mt-0.5 text-[11px] text-faint">default {d.defaults[k]}</p>{/if}
-								</div>
-							{/each}
-							<div class="col-span-full">
-								<button class="text-xs text-accent hover:underline" onclick={() => resetDetector(d.name)}>Reset to defaults</button>
-							</div>
-						</div>
-					</details>
+					{@render ruleRow(d)}
+				{/each}
+			</div>
+		</section>
+
+		<section class="card mb-5 p-5" id="my-play">
+			<h2 class="mb-1 font-semibold">My play</h2>
+			<p class="mb-4 text-sm text-muted">
+				Hints for one player, built from your logs: survival against the rest of the squad, output and
+				activity against players with the same spec and job. Rules are checked when the page opens, so
+				changes here need no re-analysis.
+			</p>
+			<label class="label" for="myacc">Open on</label>
+			<select id="myacc" class="input" bind:value={s.my_account}>
+				<option value={null}>The player who recorded the most fights</option>
+				{#if s.my_account && !players.some((p) => p.account === s.my_account)}
+					<option value={s.my_account}>{s.my_account}</option>
+				{/if}
+				{#each players as p (p.account)}
+					<option value={p.account}>{p.names[0] ?? p.account} ({p.account}) · {p.fights} fight{p.fights === 1 ? "" : "s"}</option>
+				{/each}
+			</select>
+			<p class="mt-4 mb-2 text-xs text-faint">
+				Rules marked off by default fired for almost nobody, or no more often than chance, when they were
+				calibrated on real fights; turn them on to try them.
+			</p>
+			<div class="space-y-3">
+				{#each data.personalRules ?? [] as d (d.name)}
+					{@render ruleRow(d)}
 				{/each}
 			</div>
 		</section>

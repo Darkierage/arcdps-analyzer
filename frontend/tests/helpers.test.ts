@@ -1,7 +1,8 @@
 // Unit tests for frontend helpers (run with `npm test`; Node runs the TypeScript directly).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { escapeHtml, profColor } from '#lib/format.ts';
+import { compact as compactish, escapeHtml, profColor } from '#lib/format.ts';
+import { compare, fightLink, fmtNumber, momentWindow, myPlaySearch, parseScope, scopeQuery } from '#lib/myplay.ts';
 import { trendTooltipHtml } from '#lib/trendTooltip.ts';
 import { rememberSession, sessionBackHref } from '#lib/sessionNav.ts';
 import { findSeriesRow, seriesKey } from '#lib/players.ts';
@@ -120,4 +121,34 @@ test('the Trends tooltip escapes the session name and the problem title', async 
 	assert.equal(parseTrendStat(null).key, 'winRate');
 	assert.equal(parseTrendStat('deathsPerFight').key, 'deathsPerFight');
 	assert.equal(resultsText({ results: { win: 1, even: 0, loss: 0, skirmish: 0 } }), '1W 0E 0L');
+});
+
+
+test('My play scopes become API queries and stay in the URL', () => {
+	assert.deepEqual(scopeQuery('last', null), { sessions: 1 });
+	assert.deepEqual(scopeQuery('last5', 'Reaper'), { sessions: 5, profession: 'Reaper' });
+	assert.deepEqual(scopeQuery('all', null), {});
+	assert.deepEqual(scopeQuery('days30', null, new Date(2026, 10, 25, 12)), { from: '2026-10-26' });
+	assert.equal(parseScope('nope'), 'last5');
+	assert.equal(myPlaySearch('A.1234', 'last5', null), '?player=A.1234');
+	assert.equal(myPlaySearch('A.1234', 'all', 'Firebrand'), '?player=A.1234&scope=all&spec=Firebrand');
+});
+
+test('a down links to its fight on the player at that moment', () => {
+	assert.equal(fightLink(7, 'A.1234#2', 61.6), '/fights/7?player=A.1234%232&t=62');
+	assert.equal(fightLink(7, null), '/fights/7');
+	assert.deepEqual(momentWindow('62'), [57, 64]);
+	assert.deepEqual(momentWindow('3'), [0, 5]);
+	assert.equal(momentWindow(null), null);
+	assert.equal(momentWindow('x'), null);
+});
+
+test('personal numbers are formatted by unit and judged by direction', () => {
+	assert.equal(fmtNumber(52.4, { unit: '%', key: 'cast' }), '52%');
+	assert.equal(fmtNumber(184_000, { unit: '/min', key: 'damage' }), `${compactish(184_000)} /min`);
+	assert.equal(fmtNumber(null, { unit: '/min', key: 'damage' }), '–');
+	assert.equal(compare(10, 8, true), 'better');
+	assert.equal(compare(10, 8, false), 'worse');
+	assert.equal(compare(10, 9.5, true), null);
+	assert.equal(compare(10, 8, null), null);
 });

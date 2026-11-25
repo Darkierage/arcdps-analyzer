@@ -35,6 +35,15 @@ A local desktop app for Guild Wars 2 **WvW (zerg) fights**. It turns arcdps logs
 - **Trends.** One point per session, oldest to newest: win rate, K/D or squad deaths per
   fight, with a table of every session's results and its top recurring problem. Click a
   session to open it.
+- **My play.** Hints for one player (you, or anyone in your logs): what to work on and what to
+  keep doing, over the last session, the last 5 sessions, 30 days or all fights, per spec if you
+  like. Your survival is compared with the rest of the squad in the same fights, your output
+  and cast time with players of the same spec *and the same job* (strips, damage, cleanses,
+  healing, stability) in the same fights. Each hint shows its sample next to the squad's, a
+  trend, and example fights that open on your charts at the moment. When nothing stands out it
+  says so, with your numbers next to your peers' and the squad's. A fight's and a session's
+  **You** tab show the same for that fight or session: each of your downs with the hint that
+  matches it, what hit you and your top skills. See [My play](#my-play).
 - **An in-game overlay (optional).** A small window inside Guild Wars 2 with the latest fight's
   notes and the session summary, so you don't have to alt-tab. It's a Raidcore Nexus addon,
   installed from Settings.
@@ -139,6 +148,39 @@ fight. To change the note wording, copy `backend/wvw_analyzer/notes/templates.ya
 **Calibrate against your own fights:** `scripts/calibrate.py` prints how often each detector fires
 in won vs lost fights, plus metric medians per outcome. On the first 93 fights it was tuned with,
 `strip_balance` fired in 71% of losses vs 6% of wins, and `early_cascade` in 46% vs 6%.
+
+## My play
+
+Personal hints are built only from your logs, with no outside data (no builds, no benchmarks):
+
+- **When a log is analyzed**, every squad member gets a set of facts stored with the fight:
+  their downs (stability, the party's stability, distance to the tag, other squad downs within
+  4 s, health 3 s before, the death recap's skills), time dead, cast time without
+  auto-attacks, cancelled casts, dodges, food and utility, top skills dealt and taken, their
+  job in that fight (strongest output against the squad) and, per stat, the median of the other
+  players with the same spec and job and of the squad. Older fights are re-analyzed once.
+- **When the page opens**, the rules run over those facts, so changing a rule in Settings needs
+  no re-analysis:
+
+  | Rule | Fires when | On by default |
+  |---|---|---|
+  | `me_deaths` | your downs per minute are well above the rest of the squad's in the same fights (at least 1.5x and unlikely by chance), overall or on one spec | yes |
+  | `me_low_output` | on a spec, your main job's output is below 65% of other players with that spec and job (median over fights with 2+ of them); above 140% is a strength | yes |
+  | `me_low_activity` | on a spec, your cast time without auto-attacks is below 75% of those players'; above 135% is a strength | yes |
+  | `me_no_food` | a quarter or more of your fights without food or a utility | yes |
+  | `me_down_no_stab`, `me_down_far`, `me_caught_alone`, `me_first_down` | a cause of your downs (no stability while your party had it, far from the tag, picked off alone, among the first down) is well above the squad's share | no |
+  | `me_far_from_tag`, `me_cc_taken` | much farther from the tag than the squad in most fights; CC'd far more than the squad with less stability than your party | no |
+
+  The rules that are off by default fired for almost nobody, or no more often than chance, on
+  the fights they were calibrated on. The down-rate hint still names a cause when one stands
+  out, and **Your downs** shows how your downs split next to the squad's.
+- **Same fight twice:** when two logs cover the same fight (a friend's log next to yours), the
+  one the player recorded counts. A player split by Elite Insights into several rows in one
+  fight counts once. Fights you led count for survival and food only (a commander has no
+  distance to the tag and no peers).
+- **Calibrate against your own logs:** `scripts/calibrate_personal.py` runs every rule over
+  every player in a folder of EI JSON and prints how often each fires, how often a player's job
+  changes between fights on one spec, and the recording player's profile.
 
 ## LLM debrief tuning
 
@@ -249,6 +291,7 @@ The version comes from `backend/wvw_analyzer/__init__.py`.
 - `backend/wvw_analyzer/ingest`: recorder (folder watch), processor queue, EI runner, loader
 - `backend/wvw_analyzer/metrics`: stat columns, per-second timeline, summary, session aggregation
 - `backend/wvw_analyzer/detectors`: rules producing findings
+- `backend/wvw_analyzer/coach`: personal rules and the review served to My play
 - `backend/wvw_analyzer/notes`: ranking, merging and templates
 - `backend/wvw_analyzer/llm`: llama-server lifecycle and debrief prompt
 - `backend/wvw_analyzer/api`: FastAPI REST and WebSocket; serves the built UI

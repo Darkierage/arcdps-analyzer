@@ -2,7 +2,7 @@
 	import { page } from '$app/state';
 	import { goto, replaceState } from '$app/navigation';
 	import { onMount, tick, untrack } from 'svelte';
-	import { api, type Column, type Occurrence, type Row, type SessionDetail } from '#lib/api.ts';
+	import { api, type Column, type Occurrence, type PlayerReview as Review, type Row, type SessionDetail } from '#lib/api.ts';
 	import { live, toasts } from '#lib/live.svelte.ts';
 	import { compact, dateLabel, duration, fmtValue, profColor, timeOfDay } from '#lib/format.ts';
 	import FightList from '#lib/components/FightList.svelte';
@@ -12,6 +12,7 @@
 	import { statTableNote } from '#lib/sessionNotes.ts';
 	import Badge, { severityBar } from '#lib/components/Badges.svelte';
 	import Icon from '#lib/components/Icon.svelte';
+	import PlayerReview from '#lib/components/PlayerReview.svelte';
 
 	const id = $derived(Number(page.params.id));
 	let data = $state<SessionDetail | null>(null);
@@ -37,8 +38,32 @@
 		{ id: 'support', label: 'Support' },
 		{ id: 'defense', label: 'Defense' },
 		{ id: 'positioning', label: 'Positioning' },
-		{ id: 'fights', label: 'Fights' }
+		{ id: 'fights', label: 'Fights' },
+		{ id: 'you', label: 'You' }
 	];
+
+	// "You" tab: one player's recap of this session. It follows the player picked for the
+	// trend (?player=); without one, the "My play" account if it played here.
+	let defaultAccount = $state<string | null>(null);
+	onMount(() => {
+		api.players().then((r) => (defaultAccount = r.default)).catch(() => {});
+	});
+	let youReview = $state<Review | null>(null);
+	let youError = $state<string | null>(null);
+	$effect(() => {
+		const acc = youAccount;
+		const sid = id;
+		void data;
+		if (tab !== 'you' || !acc) return;
+		youError = null;
+		let stale = false;
+		api.review(acc, { session: sid })
+			.then((r) => !stale && (youReview = r))
+			.catch((e) => !stale && ((youReview = null), (youError = e instanceof Error ? e.message : String(e))));
+		return () => {
+			stale = true;
+		};
+	});
 	const boonGroups = ['Uptime', 'Self generation', 'Group generation', 'Off-group generation', 'Squad generation'];
 
 	const toggle = (k: string) => (open = open === k ? null : k);
@@ -198,6 +223,12 @@
 	};
 	const trendKeys = $derived(agg?.trend?.keys ?? []);
 	const partyIds = $derived(Object.keys(agg?.trend?.parties ?? {}).sort((a, b) => Number(a) - Number(b)));
+	const youAccount = $derived(
+		(trendWho.startsWith('player:') && agg?.players.some((r) => r.account === trendWho.slice(7)) ? trendWho.slice(7) : null) ??
+			(defaultAccount && agg?.players.some((r) => r.account === defaultAccount) ? defaultAccount : null) ??
+			agg?.players[0]?.account ??
+			null
+	);
 	const trendPlayers = $derived([...(agg?.players ?? [])].sort((a, b) => String(a.name).localeCompare(String(b.name))));
 	// A ?player= that isn't in this session falls back to the squad.
 	const who = $derived.by(() => {
@@ -453,6 +484,25 @@
 			</div>
 		{:else if tab === 'fights'}
 			<FightList fights={data.fights} showDate={false} />
+		{:else if tab === 'you'}
+			<div class="mb-4 flex flex-wrap items-center gap-3">
+				<label class="flex items-center gap-2 text-sm text-muted">
+					Player
+					<select class="input !w-auto !py-1 text-sm" value={youAccount ?? ''} onchange={(e) => setTrendWho(`player:${e.currentTarget.value}`)}>
+						{#each trendPlayers as r (r.account)}<option value={r.account}>{r.name} ({r.fights})</option>{/each}
+					</select>
+				</label>
+				{#if youAccount}
+					<a class="ml-auto text-xs text-accent hover:underline" href="/my-play?player={encodeURIComponent(youAccount)}">More sessions in My play →</a>
+				{/if}
+			</div>
+			{#if youError}
+				<div class="card p-5 text-sm text-muted">{youError}</div>
+			{:else if youReview && youReview.account === youAccount}
+				<PlayerReview review={youReview} />
+			{:else}
+				<div class="card h-40 animate-pulse"></div>
+			{/if}
 		{:else}
 			<div class="mb-3 flex flex-wrap items-center gap-3">
 				{#if tab === 'boons'}

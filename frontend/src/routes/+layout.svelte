@@ -51,6 +51,7 @@
 		{ href: '/', label: 'Fights', icon: 'swords', match: (p: string) => p === '/' || p.startsWith('/fights') },
 		{ href: '/sessions', label: 'Sessions', icon: 'calendar', match: (p: string) => p.startsWith('/sessions') },
 		{ href: '/trends', label: 'Trends', icon: 'chart', match: (p: string) => p.startsWith('/trends') },
+		{ href: '/my-play', label: 'My play', icon: 'target', match: (p: string) => p.startsWith('/my-play') },
 		{ href: '/settings', label: 'Settings', icon: 'settings', match: (p: string) => p.startsWith('/settings') }
 	];
 </script>

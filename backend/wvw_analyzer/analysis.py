@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from .config import FilterSettings, Settings
 from .detectors import registry
 from .ingest.loader import is_wvw, load_fight, read_ei_json
+from .metrics.personal import personal_facts
 from .metrics.summary import Metrics, compute_metrics
 from .model.fight import Fight
 from .notes import ranker
@@ -16,7 +17,7 @@ from .notes.templates import render
 
 # Bump when analysis output changes (new columns, detector fixes); stored fights with another
 # version are re-analyzed on startup.
-ANALYZER_VERSION = 7  # 7: per-row series keys, clamped down/dead intervals
+ANALYZER_VERSION = 8  # 8: per-player facts for the personal review (player_fights)
 
 
 class Skipped(Exception):
@@ -33,6 +34,8 @@ class Analysis:
     summary: dict[str, Any]
     stats: dict[str, Any]
     notes: dict[str, Any]
+    # One entry per squad row for the `player_fights` table (metrics/personal.py).
+    facts: list[dict[str, Any]] = field(default_factory=list)
 
 
 def skip_reason(fight: Fight, f: FilterSettings) -> str | None:
@@ -73,7 +76,8 @@ def analyze_ei(data: dict[str, Any], log_id: str, settings: Settings,
     summary["topIssue"] = top["title"] if top else None
     summary["topSeverity"] = top["severity"] if top else None
     summary["analyzerVersion"] = ANALYZER_VERSION
-    return Analysis(summary=summary, stats=m.stats_json(), notes=notes)
+    return Analysis(summary=summary, stats=m.stats_json(), notes=notes,
+                    facts=personal_facts(m))
 
 
 def analyze_file(path: Path, settings: Settings, mode: str = "zerg") -> Analysis:
@@ -92,7 +96,8 @@ def analysis_job(ei_path: str, settings_json: dict[str, Any],
         a = analyze_file(Path(ei_path), Settings.model_validate(settings_json), mode)
     except Skipped as s:
         return {"kind": "skipped", "reason": s.reason, "summary": s.summary}
-    return {"kind": "done", "summary": a.summary, "stats": a.stats, "notes": a.notes}
+    return {"kind": "done", "summary": a.summary, "stats": a.stats, "notes": a.notes,
+            "facts": a.facts}
 
 
 def _lower_priority() -> None:

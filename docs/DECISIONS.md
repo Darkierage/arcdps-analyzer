@@ -817,10 +817,130 @@ stayed alive (seen for 6 minutes) until killed, with nothing in the log.
   socket whose shutdown fails: unpatched it keeps the connection counted; patched it closes
   and detaches it, still raises an error from the protocol, and leaves a normal close as it was.
 
+## My play: personal improvement hints (2026-11-25)
+
+Plan: [`plans/14-player-improvement.md`](plans/14-player-improvement.md). Hints for one player
+(any account in the logs), for a fight, a session or many fights, from the user's own logs only.
+
+- **Facts at analysis time, rules at request time.** The analysis worker writes one
+  `player_fights` row per squad row (`metrics/personal.py`, zlib JSON): downs from
+  `timeline.squad_downs` (plus the party's stability the second before, health 3 s before, other
+  squad downs within 4 s, rank, the death recap's span, enemies and top skills), downs left at a
+  GvG call-off kept apart and never judged, time dead and downed clamped to the log, cast time
+  without auto-attacks (dropped above 100), cancelled casts, dodges (`Dodge` casts), food and
+  utility (buff classes), top 5 skills dealt and taken, the row's job, and per stat the
+  row's value, the median and count of same-spec, same-job peers and the squad median. The rest
+  of the squad's downs are stored per row as compact tuples, without the row's own account, so a
+  rule never needs another row. `coach/` reads only these rows, so thresholds change without a
+  re-analysis. `ANALYZER_VERSION` 8. Which row a squad down belongs to is kept in
+  `Timeline.squad_down_keys`, outside the stored series.
+- **A rule is a comparison, never a bare share.** "Clearly above the squad" is an exact tail
+  probability at the squad's rate in the same fights (Poisson for the down rate, binomial for a
+  share of downs, Poisson-binomial for "among the first three") at 5%, plus a ratio or margin.
+  The baseline is the rest of the squad (the player's own downs left out). A player at the
+  squad's rate never fires; "Nothing stands out in N fights" is a result with its own text.
+- **Same spec is not same job.** A row's job is its strongest output against the squad median
+  among the outputs that reach 25% of the squad's strong players (90th percentile of those with
+  any). **Why:** `player_outliers`' absolute per-minute minimums left a third of rows without a
+  job in quiet fights, so a player's job flipped between fights in 66% of player+spec groups;
+  with the relative bar it is 38%, mostly hybrid specs (strips vs damage). A player's job on a
+  spec is the one they had in most fights on it; each row stores the same-spec peers' medians
+  per job (`spec_peers`), so the player is compared with that job's peers in *every* fight on
+  the spec, not only the fights where their own row came out with that job (which would leave
+  out exactly the weak ones).
+- **Survival runs over all fights and says when one spec stands out.** If the down rate isn't
+  high overall but is on one spec (its own gate and test), the hint is about that spec. The
+  hint names a cause (no stability, far, alone, first down) when that cause stands out in the
+  same fights, even with the cause rules off. Causes rank right after the rate, never above it.
+- **Rules kept (user's choice of the options, after the calibration).** On by default:
+  `me_deaths`/`me_survivor`, `me_low_output`/`me_top_output`, `me_low_activity`/`me_active`,
+  `me_no_food`. Off by default, available in Settings: `me_down_no_stab`, `me_down_far`,
+  `me_caught_alone`, `me_first_down` (fired at chance level), `me_far_from_tag` (fired for
+  nobody), `me_cc_taken` (fired for 1 player). Their overrides live in `Settings.detectors`
+  next to the detectors' (`registry.check_overrides` knows both registries); the Settings
+  page lists them in a "My play" section with the account to open on (`Settings.my_account`;
+  default: the account that recorded the most fights).
+- **Calibration** (`scripts/calibrate_personal.py`, dev corpus: 93 analyzed fights, 91
+  accounts, 2,910 in-fight rows; every rule on; profile scope):
+
+  | Rule | Past the gate | Issue | Strength |
+  |---|---|---|---|
+  | `me_deaths` | 78 | 19% | 9% |
+  | `me_down_no_stab` | 64 | 6% | – |
+  | `me_down_far` | 64 | 3% | – |
+  | `me_caught_alone` | 65 | 6% | – |
+  | `me_first_down` | 53 | 2% | – |
+  | `me_far_from_tag` | 86 | 0% | – |
+  | `me_low_output` (per spec) | 53 | 21% | 11% |
+  | `me_low_activity` (per spec) | 53 | 13% | 15% |
+  | `me_cc_taken` | 76 | 1% | – |
+  | `me_no_food` | 87 | 31% | – |
+
+  The cause rules' p-values were spread like chance (2 to 4 of about 64 players at p < 0.05,
+  where chance gives 3.2): down causes are squad-level in this corpus, as the plan found. The
+  down rate separates players (15 of 78 at p < 0.05, chance 3.9). No player was far from the
+  tag in most of their fights (the most: 46%). `me_no_food` is mostly "no utility": 16 players
+  almost never use one, a steady habit. Output thresholds 0.65 / 1.4 are about the 13th and
+  88th percentile of the median ratio to peers; activity's strength bar was raised to 1.35 for
+  the same reason. The recording player's profile: down rate 1.4x the squad overall (under the
+  bar), 2.1x on one spec (25 downs, the squad's rate 11.9, time dead 16% vs 4%); strengths in
+  strips and cast time on another spec; "nothing stands out" on two of the three days.
+  Examples checked by hand against the raw logs: down times, strip peers, a 0-cleanse support
+  fight, a log with food and no utility.
+- **Down-rate gate.** The rule judges once the player's downs *or* the squad's rate for their
+  time reach 3 (a squad that never goes down still makes 10 downs stand out). Its trend
+  compares downs per 10 minutes beyond the squad's rate (a difference stays finite).
+- **Scopes.** `fight`: no habits, each down gets the hint that matches it (most specific
+  first: call-off, no stability, far, alone, low health, bomb, burst). `session`: half the
+  gates and "this session" wording. Several sessions or all fights: full gates and a trend
+  (the latest third of the fights against the rest). Two logs of the same fight (time spans
+  overlapping by half the shorter) count once, the player's own log first; split rows count
+  as one player.
+- **Pages.** My play (player, scope and spec in the URL), a fight's and a session's **You**
+  tab (following the page's `?player=`), and `?t=` on a fight to open a player's chart at a
+  down. Deep links from examples and "Your downs" use the row key.
+- **Storage.** Dev database copy (29 fights) vacuumed: 3.25 MB → 3.86 MB; the facts take
+  15.8 kB per fight against 52 kB of stats and 53 kB of player rows.
+- **Validated:**
+  - Corpus snapshot before and after, all 142 logs in zerg and GvG mode (186 analyzed
+    results): summaries, notes and stat tables identical apart from the version.
+  - `tests/test_personal_facts.py` (downs with and without stability, alone and in a bomb,
+    GvG call-off downs, clamped times, cast time above 100, recap and skill tables present and
+    missing, consumables, dodges, peers without the commander, a split player, the table),
+    `tests/test_coach.py` (every rule at, below and above its gate and exactly at the squad's
+    rate, per-spec standout, the main-job comparison, trend, same fight twice, split rows,
+    defaults and overrides, every `me_*` template's placeholders in its evidence) and
+    `tests/test_my_play_api.py` (each scope, unknown player, too little data, nothing to work
+    on, the default account, the Settings list); frontend helper tests for scopes, links and
+    formatting.
+  - Browser check on a throwaway instance built from the corpus: My play for the recording
+    player and another player, an example opening the fight on the player's chart with the
+    down highlighted, a fight's You tab against its stat tables and timeline (downs, damage
+    taken, CC, dodges, healing and distance identical), a session's You tab, and saving a
+    personal rule from Settings.
+- **Review fixes (2026-11-25).** A light `/review-changes` run found 5 issues; all are fixed.
+  - **Tails on long profiles.** The binomial tail overflowed (`math.comb` of 1,000+ downs) and
+    the Poisson tail underflowed (`exp(-mu)` above about 745), so on an "all fights" profile
+    the review returned a 500 once the down rate fired, or the down rate never fired. Both are
+    now summed on a log scale (`lgamma`), and the cause check that names a down-rate cause has
+    the same error guard as the rules.
+  - **Settings thresholds in "Your downs".** The split table and the per-down hints used the
+    cause rules' defaults; they now use the rules built from Settings.
+  - **A player who wasn't in the fight** got an empty recap and a "You" tab stuck loading; the
+    API now answers 404 and the tab only offers players who were in the fight.
+  - **Fights you led** count for survival and food (user's choice of the options; the README
+    said "survival only").
+  - **Validated:** regression tests for each (exact tails at 1,030 and 760 and against brute
+    force on small cases, a 400-fight profile that fires and names its cause, thresholds from
+    Settings in the split and the hints, the 404); no analysis output changed, so no
+    re-analysis.
+
 ## Open items at the time of writing
 
 - The Trends page has its first slice only (results per session). Not built: problems across
   sessions, per-player and per-party trends, squad stats, and filters by mode, date, map or
   commander.
+- My play's cause, distance and CC rules are off by default after a calibration on one
+  recording player's three raid days; with more players' logs they may hold.
 - The installer and exe are not code-signed (SmartScreen warning). Signing needs a paid
   certificate or signing service.

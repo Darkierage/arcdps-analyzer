@@ -409,9 +409,160 @@ export interface OverlayAddonStatus {
 	nexusUrl: string;
 }
 
+// ---- Personal review ("My play"): GET /api/players, /api/players/{account}/review ----------
+
+export interface PlayerInfo {
+	account: string;
+	fights: number;
+	/** Fights this account recorded. */
+	povFights: number;
+	names: string[];
+	professions: string[];
+}
+
+export interface Advice extends Finding {
+	area: 'survival' | 'play';
+	spec: string | null;
+	/** "14 of 31 downs, the squad's share: 6.2 of 31". */
+	sample: string;
+	examples: { fightId: number; t: number | null; start: string | null }[];
+	trend: 'better' | 'same' | 'worse' | null;
+}
+
+export interface RuleGate {
+	rule: string;
+	label: string;
+	spec: string | null;
+	need: string;
+}
+
+export interface DownHint {
+	key: string;
+	title: string;
+	cause: string;
+	fix: string;
+}
+
+export interface DownRecap {
+	span: number;
+	enemies: number | null;
+	top: { skill: string; share: number; spec: string | null }[];
+}
+
+export interface PlayerDown {
+	fightId: number;
+	start: string | null;
+	map: string | null;
+	/** The squad row (series key) that went down. */
+	key: string | null;
+	t: number;
+	stab: number;
+	party_stab: number | null;
+	dist_tag: number | null;
+	near: number;
+	died: boolean;
+	hp_before: number | null;
+	rank?: number;
+	recap?: DownRecap;
+	left?: boolean;
+	after_calloff?: boolean;
+	hint: DownHint;
+}
+
+export interface MyNumber {
+	key: string;
+	label: string;
+	unit: string;
+	higherIsBetter: boolean | null;
+	you: number | null;
+	peers: number | null;
+	peerFights: number;
+	squad: number | null;
+	trend: 'better' | 'same' | 'worse' | null;
+}
+
+export interface DownSplit {
+	key: string;
+	label: string;
+	you: number;
+	of: number;
+	/** The rest of the squad's share in the same fights, as a count out of `of`. */
+	squadExpected: number | null;
+}
+
+export interface SkillRow {
+	skill: string;
+	damage: number;
+	share: number;
+	hits: number;
+	connected?: number;
+	blocked?: number;
+	evaded?: number;
+	missed?: number;
+}
+
+export interface FightRecap {
+	fightId: number;
+	start: string | null;
+	map: string | null;
+	result: Result | null;
+	mode: FightMode;
+	key: string;
+	spec: string;
+	specs: string[];
+	job: string | null;
+	commander: boolean;
+	pov: boolean;
+	activeS: number;
+	deadS: number;
+	food: boolean | null;
+	utility: boolean | null;
+	cancels: number;
+	firstRank: number | null;
+	squad: { players: number; downs_total: number; players_downed: number };
+	downs: PlayerDown[];
+	dealt: SkillRow[] | null;
+	taken: SkillRow[] | null;
+}
+
+export interface PlayerReview {
+	account: string;
+	name: string;
+	allSpecs: string[];
+	scope: {
+		kind: 'fight' | 'session' | 'profile';
+		fights: number;
+		sessions: number;
+		from: string | null;
+		to: string | null;
+		specs: { spec: string; fights: number }[];
+		commanderFights: number;
+		activeS: number;
+	};
+	numbers: MyNumber[];
+	downSplit: DownSplit[];
+	downCount: number;
+	deathCount: number;
+	advice: { work: Advice[]; more: Advice[]; keep: Advice[]; nothing: Finding | null } | null;
+	gates: RuleGate[];
+	recentDowns?: PlayerDown[];
+	fight?: FightRecap | null;
+}
+
+export interface ReviewScope {
+	fight?: number;
+	session?: number;
+	sessions?: number;
+	from?: string;
+	to?: string;
+	profession?: string;
+}
+
 export interface SettingsResponse {
 	settings: any;
 	detectors: DetectorInfo[];
+	/** The personal rules ("My play"); their overrides live in settings.detectors too. */
+	personalRules: (DetectorInfo & { personal: true; enabledByDefault: boolean })[];
 	resolvedLogDir: string;
 	defaultLogDir: string;
 	resolvedEiPath: string;
@@ -508,5 +659,12 @@ export const api = {
 	diagnostics: () =>
 		request<{ text: string; path: string | null }>('POST', '/api/diagnostics', { userAgent: navigator.userAgent }),
 	openDataFolder: () => request<{ opened: boolean; path: string }>('POST', '/api/diagnostics/open-folder'),
-	dismissCrashes: () => request<{ ok: boolean }>('POST', '/api/diagnostics/dismiss')
+	dismissCrashes: () => request<{ ok: boolean }>('POST', '/api/diagnostics/dismiss'),
+	players: () => request<{ players: PlayerInfo[]; default: string | null }>('GET', '/api/players'),
+	review: (account: string, scope: ReviewScope = {}) => {
+		const q = new URLSearchParams();
+		for (const [k, v] of Object.entries(scope)) if (v != null && v !== '') q.set(k, String(v));
+		const qs = q.toString();
+		return request<PlayerReview>('GET', `/api/players/${encodeURIComponent(account)}/review${qs ? `?${qs}` : ''}`);
+	}
 };

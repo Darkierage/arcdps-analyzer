@@ -6,6 +6,7 @@ import json
 import sqlite3
 import threading
 import zlib
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -45,6 +46,23 @@ CREATE TABLE IF NOT EXISTS analyses (
     debrief TEXT,
     debrief_at TEXT
 );
+-- Per squad row facts for the personal review (metrics/personal.py), so a profile over many
+-- fights doesn't unpack every fight's stats. A split player has one row per EI row (`key`).
+CREATE TABLE IF NOT EXISTS player_fights (
+    fight_id INTEGER NOT NULL REFERENCES fights(id) ON DELETE CASCADE,
+    key TEXT NOT NULL,
+    account TEXT NOT NULL,
+    name TEXT,
+    profession TEXT,
+    party INTEGER,
+    is_pov INTEGER NOT NULL DEFAULT 0,
+    is_commander INTEGER NOT NULL DEFAULT 0,
+    in_fight INTEGER NOT NULL DEFAULT 0,
+    active_s REAL,
+    facts BLOB,                                 -- zlib(JSON)
+    PRIMARY KEY (fight_id, key)
+);
+CREATE INDEX IF NOT EXISTS player_fights_account ON player_fights(account);
 """
 
 ACTIVE_STATUSES = ("queued", "parsing", "analyzing")
@@ -193,13 +211,21 @@ class Database:
             (reason, _dumps(summary) if summary else None,
              (summary or {}).get("start"), _now(), fight_id))
         self._exec("DELETE FROM analyses WHERE fight_id=?", (fight_id,))
+        self._exec("DELETE FROM player_fights WHERE fight_id=?", (fight_id,))
 
     def save_analysis(self, fight_id: int, summary: dict[str, Any], stats: dict[str, Any],
-                      notes: dict[str, Any]) -> None:
+                      notes: dict[str, Any], facts: list[dict[str, Any]] | None = None) -> None:
+        """Store an analysis. `facts` (one per squad row, see metrics/personal.py) replace the
+        fight's `player_fights` rows; None leaves the fight without any."""
         # Serialize and compress before taking the lock: a large fight's stats take tens of ms,
         # and every other DB call (overlay polls, page requests) waits on the lock.
         packed, notes_json = _pack(stats), _dumps(notes)
         players_json = _dumps(stats.get("players"))
+        fact_rows = [
+            (fight_id, f["key"], f["account"], f.get("name"), f.get("profession"),
+             f.get("party"), int(bool(f.get("is_pov"))), int(bool(f.get("is_commander"))),
+             int(bool(f.get("in_fight"))), f.get("active_s"), _pack(f["facts"]))
+            for f in facts or []]
         with self._lock:
             # A stored debrief was worded from the previous notes and summary: keep it only if
             # the re-analysis produced exactly the same ones.
@@ -221,6 +247,11 @@ class Database:
                    ON CONFLICT(fight_id) DO UPDATE SET stats=excluded.stats,
                    notes=excluded.notes, players=excluded.players""",
                 (fight_id, packed, notes_json, players_json))
+            self._conn.execute("DELETE FROM player_fights WHERE fight_id=?", (fight_id,))
+            self._conn.executemany(
+                """INSERT INTO player_fights(fight_id, key, account, name, profession, party,
+                   is_pov, is_commander, in_fight, active_s, facts)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""", fact_rows)
             self._conn.commit()
 
     def set_mode(self, fight_ids: list[int], mode: str) -> None:
@@ -336,6 +367,56 @@ class Database:
             s["start"] = s["start"] or s["started_at"]
             del s["started_at"]
         return sorted(sessions.values(), key=lambda s: (s["start"] or "", s["id"]))
+
+    # ---- personal review (player_fights) --------------------------------------------------
+    def players(self) -> list[dict[str, Any]]:
+        """Every account with analyzed in-fight rows: fights, the fights it recorded, and its
+        names and specs, most used first (for the player picker)."""
+        rows = self._all(
+            """SELECT p.account, p.name, p.profession, p.fight_id, p.is_pov
+               FROM player_fights p JOIN fights f ON f.id = p.fight_id
+               WHERE f.status='done' AND p.in_fight=1""")
+        acc: dict[str, dict[str, Any]] = {}
+        for r in rows:
+            a = acc.setdefault(r["account"], {"account": r["account"], "fights": set(),
+                                              "pov": set(), "names": Counter(),
+                                              "professions": Counter()})
+            a["fights"].add(r["fight_id"])
+            if r["is_pov"]:
+                a["pov"].add(r["fight_id"])
+            a["names"][r["name"]] += 1
+            a["professions"][r["profession"]] += 1
+        out = [{"account": a["account"], "fights": len(a["fights"]),
+                "povFights": len(a["pov"]),
+                "names": [n for n, _ in a["names"].most_common()],
+                "professions": [p for p, _ in a["professions"].most_common()]}
+               for a in acc.values()]
+        return sorted(out, key=lambda a: (-a["fights"], a["account"]))
+
+    def player_fight_rows(self, account: str) -> tuple[list[dict[str, Any]],
+                                                       dict[int, dict[str, Any]]]:
+        """An account's `player_fights` rows (facts unpacked) and, per fight, what the review
+        needs: start, duration, session, mode, result, map and log name."""
+        rows = self._all(
+            """SELECT p.*, f.fight_start, f.session_id, f.summary, f.log_name, f.mode
+               FROM player_fights p JOIN fights f ON f.id = p.fight_id
+               WHERE p.account=? AND f.status='done'""", (account,))
+        fights: dict[int, dict[str, Any]] = {}
+        out = []
+        for r in rows:
+            if r["fight_id"] not in fights:
+                summary = json.loads(r["summary"]) if r["summary"] else {}
+                fights[r["fight_id"]] = {
+                    "start": r["fight_start"] or summary.get("start"),
+                    "dur_s": summary.get("durationS"), "session_id": r["session_id"],
+                    "mode": r["mode"], "result": summary.get("result"),
+                    "map": summary.get("map"), "log_name": r["log_name"]}
+            out.append({"fight_id": r["fight_id"], "key": r["key"], "account": r["account"],
+                        "name": r["name"], "profession": r["profession"], "party": r["party"],
+                        "is_pov": bool(r["is_pov"]), "is_commander": bool(r["is_commander"]),
+                        "in_fight": bool(r["in_fight"]), "active_s": r["active_s"],
+                        "facts": _unpack(r["facts"])})
+        return out, fights
 
     def analysis_notes(self, fight_id: int) -> dict[str, Any] | None:
         """Notes and debrief without unpacking the stats blob (the overlay's poll)."""

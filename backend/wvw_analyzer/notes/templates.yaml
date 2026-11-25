@@ -201,3 +201,171 @@ player_outliers:
   fix: >-
     Check build and gear for these players and explain their job (strip timing, stab rotation,
     staying on tag). Pair them with an experienced player of the same class.
+
+# ---- Personal review ("My play", coach/). One player, compared with the rest of the squad
+# (survival, distance, CC) or with players of the same spec and job (output, activity) in the
+# same fights. {scope_txt} is "in 48 fights" or "this session (12 fights)"; {scope_cap} is the
+# same, capitalized.
+
+me_deaths:
+  title: "You go down more than the squad{on_spec}"
+  cause: >-
+    {scope_cap}{on_spec} you went down {downs} times ({deaths} deaths): {per10} downs per 10
+    minutes in the fight, against {squad_per10} for the rest of the squad in the same fights
+    ({ratio}x). You spent {dead_pct}% of your time dead, the squad
+    {squad_dead_pct}%.{spec_txt}{causes_txt}
+  fix: >-
+    Survival comes first: a dead player gives no output and costs the squad a res. Watch your
+    health and pull back to the tag earlier, keep a stun break and a defensive skill for the
+    enemy push, and stay inside your party's boons.
+
+me_survivor:
+  title: "You stay up"
+  cause: >-
+    {scope_cap} you went down {downs} times: {per10} downs per 10 minutes against
+    {squad_per10} for the rest of the squad in the same fights.
+
+me_down_no_stab:
+  title: "Downs without stability while your party had it"
+  cause: >-
+    {scope_cap}, {hits} of your {downs} downs ({share}%) came with no stability on you while
+    most of your party had it. For the rest of the squad, in the same fights, that share
+    was {squad_share}%.
+  fix: >-
+    Stay in range of your party's stability (about 600 from your firebrand), move with the
+    party into the push instead of before it, and keep a stun break for when it is stripped.
+
+me_down_far:
+  title: "Downs far from the tag"
+  cause: >-
+    {scope_cap}, {hits} of your {downs} downs ({share}%) were more than {far_tag} from the
+    commander. For the rest of the squad, in the same fights, that share was {squad_share}%.
+  fix: >-
+    Stay on the tag: being out of the blob means no boons, no heals and no cover when the
+    enemy turns. Retreat towards the tag, not away from it, and don't chase downed enemies
+    past the squad.
+
+me_caught_alone:
+  title: "Caught alone"
+  cause: >-
+    {scope_cap}, {hits} of your {downs} downs ({share}%) happened with at most one other
+    squad down within 4 s: you were picked off rather than caught in a bomb. For the rest
+    of the squad, in the same fights, that share was {squad_share}%.
+  fix: >-
+    Watch the flanks and the back of the blob, don't over-extend after a push, and start
+    retreating with the squad, not after it.
+
+me_first_down:
+  title: "Among the first to go down"
+  cause: >-
+    In {big_fights} fights with {min_squad_downs}+ squad downs where you went down, you were
+    among the first {first} players downed {hits} times. By chance it would be about
+    {expected}.
+  fix: >-
+    The opening is where you get caught: don't enter before the tag and the boons, and stay
+    in the middle of your party when the blobs first collide.
+
+me_far_from_tag:
+  title: "Far from the tag"
+  cause: >-
+    In {far_fights} of {tag_fights} fights with a commander you were usually much farther
+    from the tag than the squad: typically {you_dist} against the squad's {squad_dist}.
+  fix: >-
+    Follow the tag closely, especially when it turns or retreats: boons, heals and cleanses
+    are aimed at the blob.
+
+me_low_output:
+  title: "Low {job_txt} on {spec}"
+  cause: >-
+    On {spec} your main job was {job_txt}. In {peer_fights} fights with other {spec}s on the
+    same job, yours was {you_pct}% of theirs (median).
+  fix: >-
+    Compare your skill use with a stronger {spec} in the same fights (Offense and Support
+    tabs), and check that your build fits the job the squad expects from {spec}.
+
+me_top_output:
+  title: "Strong {job_txt} on {spec}"
+  cause: >-
+    In {peer_fights} fights with other {spec}s on {job_txt}, yours was {you_pct}% of theirs
+    (median).
+
+me_low_activity:
+  title: "Few skills pressed on {spec}"
+  cause: >-
+    On {spec} your main job was {job_txt}. In {peer_fights} fights with other {spec}s on the
+    same job, you spent {you_cast}% of the time casting skills other than auto-attacks
+    against their {peer_cast}% ({you_pct}% of theirs, median).
+    Cancelled casts cost you {you_cancel} s per minute, them {peer_cancel} s.
+  fix: >-
+    Use your skills on cooldown when they do your job, and avoid cancelling casts by moving
+    or dodging mid-cast unless you have to.
+
+me_active:
+  title: "Active on {spec}"
+  cause: >-
+    In {peer_fights} fights you spent {you_cast}% of the time casting skills against
+    {peer_cast}% for the other {spec}s on {job_txt}.
+
+me_cc_taken:
+  title: "CC'd more than the squad"
+  cause: >-
+    In {cc_fights} fights you received {ratio}x the squad's median crowd control per minute,
+    and in {below_fights} of them your stability uptime was below your party's.
+  fix: >-
+    Stay in range of your party's stability, and keep a stun break or a stability skill for
+    the enemy's CC bomb.
+
+me_no_food:
+  title: "Missing food or utility"
+  cause: >-
+    In {missing} of {known} fights ({share}%) you had no food ({no_food}) or no utility
+    ({no_utility}).
+  fix: >-
+    Eat food and use a utility (oil, stone, crystal) before every fight; both are free stats.
+
+me_nothing:
+  title: "Nothing stands out {scope_txt}"
+  cause: >-
+    Compared with the rest of the squad and with players of your spec and job in the same
+    fights, none of the checks finds something you do clearly worse. Your numbers are below.
+
+# One hint per down on the fight's "You" tab and in "Your downs" (coach/report.py). A single
+# down is never a habit: these say what matched this down, not what you always do.
+me_hint_calloff:
+  title: "{time}: left downed at the call-off"
+  cause: "The round was called while you were down; it is not judged."
+
+me_hint_no_stab:
+  title: "{time}: down without stability"
+  cause: >-
+    You had no stability while {party_stab}% of your party had it just before.
+  fix: Stay in range of your party's stability when the push comes.
+
+me_hint_far:
+  title: "{time}: down {dist_tag} from the tag"
+  cause: You went down far from the commander, outside the blob's boons and heals.
+  fix: Fall back to the tag before you take the fight.
+
+me_hint_alone:
+  title: "{time}: picked off"
+  cause: >-
+    {near} other squad member(s) went down within 4 s of you: you were caught alone, not in
+    a bomb.
+  fix: Watch the flank you are on and retreat with the squad, not after it.
+
+me_hint_low_hp:
+  title: "{time}: down from low health"
+  cause: You were at {hp_before}% health 3 s before going down.
+  fix: Pull back or use a heal and a defensive skill earlier, before the last hit.
+
+me_hint_bomb:
+  title: "{time}: down in a bomb"
+  cause: >-
+    {near} other squad members went down within 4 s of you, with {stab} stability on you:
+    a squad-level moment (see the fight's debrief).
+
+me_hint_burst:
+  title: "{time}: down in a burst"
+  cause: >-
+    You were at {hp_before}% health 3 s before, with {stab} stability, and {near} other
+    squad member(s) went down within 4 s.

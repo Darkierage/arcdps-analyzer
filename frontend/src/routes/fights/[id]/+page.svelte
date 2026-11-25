@@ -2,7 +2,7 @@
 	import { page } from '$app/state';
 	import { goto, pushState, replaceState } from '$app/navigation';
 	import { onMount, tick, untrack } from 'svelte';
-	import { api, type Column, type FightDetail, type FindingFocus, type PlayerSeries, type Row } from '#lib/api.ts';
+	import { api, type Column, type FightDetail, type FindingFocus, type PlayerDown, type PlayerReview, type PlayerSeries, type Row } from '#lib/api.ts';
 	import { live, toasts } from '#lib/live.svelte.ts';
 	import { compact, dateLabel, duration, fmtValue, profColor, timeOfDay } from '#lib/format.ts';
 	import Badge from '#lib/components/Badges.svelte';
@@ -15,6 +15,8 @@
 	import { sessionBackHref } from '#lib/sessionNav.ts';
 	import StatTable from '#lib/components/StatTable.svelte';
 	import Icon from '#lib/components/Icon.svelte';
+	import FightRecap from '#lib/components/FightRecap.svelte';
+	import { momentWindow } from '#lib/myplay.ts';
 
 	const id = $derived(Number(page.params.id));
 	let data = $state<FightDetail | null>(null);
@@ -35,6 +37,8 @@
 	let focusStat = $state<FindingFocus | null>(null);
 	let fromSession = $state(false);
 	let pendingFinding: string | null = null;
+	// ?t=<s> (a down linked from My play): highlight that moment on the picked player's chart.
+	let pendingMoment: [number, number] | null = null;
 
 	async function load() {
 		try {
@@ -45,6 +49,13 @@
 				const key = pendingFinding;
 				pendingFinding = null;
 				showFinding(key);
+			} else if (pendingMoment) {
+				highlight = pendingMoment;
+				pendingMoment = null;
+				if (tab === 'debrief') {
+					await tick();
+					document.getElementById('fight-timeline')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+				}
 			}
 		} catch (e) {
 			toasts.error(e);
@@ -75,6 +86,7 @@
 			pendingFinding = q.get('finding');
 			fromSession = q.get('from') === 'session';
 			party = partyFromUrl(q);
+			pendingMoment = momentWindow(q.get('t'));
 			focusFinding = null;
 			showMore = false;
 			tab = pendingFinding ? 'debrief' : tabs.some((x) => x.id === t) ? t! : 'debrief';
@@ -256,8 +268,54 @@
 		{ id: 'offense', label: 'Offense' },
 		{ id: 'support', label: 'Support' },
 		{ id: 'defense', label: 'Defense' },
-		{ id: 'positioning', label: 'Positioning' }
+		{ id: 'positioning', label: 'Positioning' },
+		{ id: 'you', label: 'You' }
 	];
+
+	// "You" tab: one player's recap for this fight. It follows the page's picked player
+	// (?player=); without one, the "My play" account if it was here, else the log's recorder.
+	let defaultAccount = $state<string | null>(null);
+	onMount(() => {
+		api.players().then((r) => (defaultAccount = r.default)).catch(() => {});
+	});
+	const fightAccounts = $derived.by(() => {
+		const seen = new Map<string, Row>();
+		for (const r of pickPlayers) if (r.in_fight !== false && !seen.has(r.account)) seen.set(r.account, r);
+		return [...seen.values()].sort((a, b) => String(a.name).localeCompare(String(b.name)));
+	});
+	// Only players who were in the fight: the select lists them, and others have no recap.
+	const youAccount = $derived(
+		(pickedPlayer && fightAccounts.some((r) => r.account === pickedPlayer.account) ? pickedPlayer.account : null) ??
+			(defaultAccount && fightAccounts.some((r) => r.account === defaultAccount) ? defaultAccount : null) ??
+			fightAccounts.find((r) => r.name === s?.pov)?.account ??
+			null
+	);
+	let youReview = $state<PlayerReview | null>(null);
+	let youError = $state<string | null>(null);
+	$effect(() => {
+		const acc = youAccount;
+		const fid = id;
+		void data?.stats;
+		if (tab !== 'you' || !acc) return;
+		youReview = null;
+		youError = null;
+		let stale = false;
+		api.review(acc, { fight: fid })
+			.then((r) => !stale && (youReview = r))
+			.catch((e) => !stale && (youError = e instanceof Error ? e.message : String(e)));
+		return () => {
+			stale = true;
+		};
+	});
+
+	/** A down on the "You" tab: that player's charts on the Debrief, at the moment. */
+	async function showDown(d: PlayerDown) {
+		party = `player:${d.key ?? youAccount}`;
+		highlight = momentWindow(String(d.t));
+		setTab('debrief');
+		await tick();
+		document.getElementById('fight-timeline')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+	}
 
 	const overviewCols = $derived(
 		['damage', 'down_contribution', 'strips', 'cleanses', 'healing', 'up_1122', 'up_26980', 'downs', 'deaths', 'fight_dist_tag']
@@ -569,6 +627,26 @@
 						</div>
 					</div>
 				</div>
+			{:else if tab === 'you'}
+				<div class="mb-4 flex items-center gap-3">
+					<label class="flex items-center gap-2 text-sm text-muted">
+						Player
+						<select class="input !w-auto !py-1 text-sm" value={youAccount ?? ''} onchange={(e) => setParty(`player:${e.currentTarget.value}`)}>
+							{#each fightAccounts as r (r.account)}
+								<option value={r.account}>{r.name} · {r.profession}</option>
+							{/each}
+						</select>
+					</label>
+				</div>
+				{#if youError}
+					<div class="card p-5 text-sm text-muted">{youError}</div>
+				{:else if youReview?.fight}
+					<FightRecap review={youReview} onpick={showDown} />
+				{:else if youReview || !youAccount}
+					<div class="card p-5 text-sm text-muted">No squad member who was in this fight to show.</div>
+				{:else}
+					<div class="card h-40 animate-pulse"></div>
+				{/if}
 			{:else}
 				{#if tab === 'boons'}
 					<div class="card mb-5 scroll-mt-4 p-4" id="boons-over-time">

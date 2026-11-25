@@ -81,8 +81,11 @@ class Settings(BaseModel):
     # Mode for newly added fights; each fight stores its own mode (it can be changed per fight).
     fight_mode: FightMode = "zerg"
     gvg: GvgSettings = Field(default_factory=GvgSettings)
-    # Per-detector overrides, e.g. {"stab_gap_deaths": {"enabled": true, "min_downs": 3}}
+    # Per-detector overrides, e.g. {"stab_gap_deaths": {"enabled": true, "min_downs": 3}}; the
+    # personal rules ("My play", names starting with me_) are set here too.
     detectors: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    # The account "My play" opens on; None: the account that recorded the most fights.
+    my_account: str | None = None
 
     @field_validator("host")
     @classmethod

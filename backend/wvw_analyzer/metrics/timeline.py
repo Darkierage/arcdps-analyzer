@@ -98,6 +98,9 @@ class Timeline:
     # "squad" / party group -> boon id (coverage) and "<id>s" (average stacks) -> series
     boon_series: dict[str, dict[str, np.ndarray]] = field(default_factory=dict)
     squad_downs: list[dict[str, Any]] = field(default_factory=list)
+    # The row key (`PlayerTimeline.key`) of each entry in `squad_downs`, same order. Kept out of
+    # the stored series: only the personal facts (`metrics/personal.py`) use it.
+    squad_down_keys: list[str] = field(default_factory=list)
     squad_deaths: list[dict[str, Any]] = field(default_factory=list)
     enemy_downs: list[float] = field(default_factory=list)
     enemy_deaths: list[float] = field(default_factory=list)
@@ -338,6 +341,7 @@ def build_timeline(fight: Fight, mode: str = "zerg", round_gap_s: float = 25.0,
 
 
 def _collect_events(fight: Fight, tl: Timeline, center: np.ndarray) -> None:
+    down_keys: list[str] = []
     for pt in tl.players:
         p = pt.player
         dead_starts = [s for s, _ in p.dead_intervals]
@@ -378,12 +382,16 @@ def _collect_events(fight: Fight, tl: Timeline, center: np.ndarray) -> None:
                 "dist_tag": None if d_tag is None else round(d_tag),
                 "dist_stack": None if d_center is None else round(d_center),
             })
+            down_keys.append(pt.key)
         if pt.in_fight:
             for s, _ in p.dead_intervals:
                 tl.squad_deaths.append(
                     {"t": round(s / 1000.0, 2), "player": p.name, "group": p.group,
                      "round": round_of(s / 1000.0, tl.rounds)})
-    tl.squad_downs.sort(key=lambda e: e["t"])
+    # A stable sort, so the keys follow their downs (same order as sorting the downs alone).
+    pairs = sorted(zip(tl.squad_downs, down_keys, strict=True), key=lambda x: x[0]["t"])
+    tl.squad_downs = [d for d, _ in pairs]
+    tl.squad_down_keys = [k for _, k in pairs]
     tl.squad_deaths.sort(key=lambda e: e["t"])
     for en in fight.enemies:
         for s, e in en.down_intervals:

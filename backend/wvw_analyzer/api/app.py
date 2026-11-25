@@ -10,13 +10,15 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .. import __version__, diagnostics, paths
+from ..coach import registry as coach_registry
+from ..coach import report
 from ..config import FightMode
 from ..detectors import registry
 from ..ingest.recorder import iter_logs
@@ -252,6 +254,38 @@ def create_app(state: AppState) -> FastAPI:
         """One row per session with analyzed fights, oldest first (the Trends page)."""
         return {"sessions": session_trend(state.db.trend_sessions())}
 
+    # ---- personal review ("My play") ------------------------------------------------------
+    def _default_account(players: list[dict[str, Any]]) -> str | None:
+        mine = state.config.settings.my_account
+        if mine and any(p["account"] == mine for p in players):
+            return mine
+        recorded = [p for p in players if p["povFights"]]
+        best = max(recorded, key=lambda p: (p["povFights"], p["fights"]), default=None)
+        return best["account"] if best else (players[0]["account"] if players else None)
+
+    @app.get("/api/players")
+    def players() -> dict[str, Any]:
+        """Accounts in analyzed fights (the player picker) and the one to open on."""
+        ps = state.db.players()
+        return {"players": ps, "default": _default_account(ps)}
+
+    @app.get("/api/players/{account}/review")
+    def player_review(account: str, fight: int | None = None, session: int | None = None,
+                      sessions: int | None = None, start: str | None = Query(None, alias="from"),
+                      end: str | None = Query(None, alias="to"),
+                      profession: str | None = None) -> dict[str, Any]:
+        rows, fights = state.db.player_fight_rows(account)
+        if not rows:
+            raise HTTPException(404, "No analyzed fights for this player")
+        # Only rows in the fight count (as everywhere in the review): a squad member elsewhere
+        # on the map has a row but no recap.
+        if fight is not None and not any(r["fight_id"] == fight and r["in_fight"]
+                                         for r in rows):
+            raise HTTPException(404, "This player was not in that fight")
+        return report.review(account, rows, fights, state.config.settings.detectors,
+                             fight=fight, session=session, sessions=sessions, start=start,
+                             end=end, profession=profession)
+
     # ---- fights -----------------------------------------------------------------------
     @app.get("/api/fights")
     def fights(session_id: int | None = None, include_skipped: bool = False,
@@ -334,6 +368,7 @@ def create_app(state: AppState) -> FastAPI:
         return {
             "settings": s.model_dump(mode="json"),
             "detectors": registry.describe(s.detectors),
+            "personalRules": coach_registry.describe(s.detectors),
             "resolvedLogDir": str(s.resolved_log_dir() or ""),
             "defaultLogDir": str(paths.default_log_dir() or ""),
             "resolvedEiPath": str(s.resolved_ei_path()),

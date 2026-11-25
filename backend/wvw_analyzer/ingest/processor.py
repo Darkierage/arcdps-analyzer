@@ -161,7 +161,8 @@ class Processor:
         if result["kind"] == "skipped":
             self.db.set_skipped(fight_id, result["reason"], result["summary"])
             return
-        self.db.save_analysis(fight_id, result["summary"], result["stats"], result["notes"])
+        self.db.save_analysis(fight_id, result["summary"], result["stats"], result["notes"],
+                              result.get("facts"))
         log.info("analyzed fight %s in %.2fs", fight_id, time.perf_counter() - t0)
         self.last_done_at = time.time()
         for cb in self.on_done:

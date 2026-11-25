@@ -1,6 +1,14 @@
 # WvW Analyzer: personal improvement ("My play") plan
 
-> **Status:** approved 2026-11-25, not implemented yet. Before approval the proposal was
+> **Status:** implemented 2026-11-25 (see `DECISIONS.md`, "My play"). Deviations: a row's job
+> uses a relative bar (25% of the squad's strong players) instead of `player_outliers`'
+> absolute minimums, and peers' medians are stored per job so the main job is judged in every
+> fight on a spec; "clearly above" is an exact tail test plus a ratio or margin; after the
+> calibration six rules (the four down causes, distance to tag, CC taken) are off by default
+> (user's choice); the down rate also fires for one spec that stands out on its own; output
+> thresholds 0.65 / 1.4, activity strength 1.35.
+>
+> Approved 2026-11-25. Before approval the proposal was
 > reviewed against the corpus and the code; the corrections are folded in (down causes must be
 > measured against the squad's rate, same spec is not same job, storage size, split rows, the
 > commander). The thresholds are starting values; step 2 calibrates them on the corpus before
