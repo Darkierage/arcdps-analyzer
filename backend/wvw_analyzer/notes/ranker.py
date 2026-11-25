@@ -32,7 +32,9 @@ def rank(findings: list[Finding]) -> dict[str, list[Finding]]:
             host.impact += 0.25 * f.impact  # supporting evidence strengthens the main finding
             continue
         kept.append(f)
-    kept.sort(key=lambda f: (SEVERITY_ORDER[f.severity] > 1, -f.impact))
+    # Severity first (critical, major, minor, context), then impact: a big minor note never
+    # sits above a critical one, nor a context note above a minor one.
+    kept.sort(key=lambda f: (SEVERITY_ORDER[f.severity], -f.impact))
     return {
         "issues": kept[:MAX_ISSUES],
         "more": kept[MAX_ISSUES:],

@@ -238,7 +238,9 @@ also shows the standard per-player, per-party and per-squad log stats, like othe
   browses a fight of an older session. The addon shows **Latest** whenever the fight on screen
   isn't that one, and picking it with **>** goes back to following. (In 0.5.0 the addon only
   knew the browsed fight's session, so it could get stuck there after a new session started.)
-- **Auto-show.** The window opens, once MumbleLink says the player is out of combat, when
+- **Auto-show** (replaced in 0.7.0 by the *After a fight* setting, see "In-game overlay
+  redesign"; the new-fight rule below is unchanged). The window opens, once MumbleLink says the
+  player is out of combat, when
   `latest.addedAt` (when the app picked up the log) moves past everything the addon has seen.
   The first payload only sets the baseline, so fights already there at game start don't open
   it, but the first fight of an empty session does. Deleting fights or a re-analysis doesn't
@@ -313,6 +315,7 @@ Origin and WebSocket attack tried. High and medium findings were fixed:
   an event in a lull, so that fix is covered by a unit test.
 - **Debriefs follow the analysis.** A re-analysis keeps the stored LLM debrief only if the new
   notes and summary are identical; otherwise it is dropped (its wording came from the old ones).
+  The summary's `analyzerVersion` doesn't count (since 0.7.0): a version bump alone keeps it.
 - **Stopping recording finishes the last log.** The scan thread keeps checking logs that are
   still being written for `stable_s` + 10 s, adds them to the stopped session, then ends it.
   Stop returns at once. Each recording has its own stop flag and session id, so a new recording
@@ -817,9 +820,116 @@ stayed alive (seen for 6 minutes) until killed, with nothing in the log.
   socket whose shutdown fails: unpatched it keeps the connection counted; patched it closes
   and detaches it, still raises an error from the protocol, and leaves a normal close as it was.
 
+## In-game overlay redesign (2026-11-25)
+
+Plan 14. Players use the overlay most, and it read as flat, compressed text.
+
+- **Notes strictly by severity.** The ranker sorted critical with major and minor with context
+  by impact, so a major could sit above a critical. Now it is severity, then impact. Which
+  critical and major notes are kept can't change; only which minor and context notes make the
+  top five. `ANALYZER_VERSION` 8.
+- **A version bump keeps debriefs.** The keep rule compared the whole summary, which carries
+  `analyzerVersion`, so every bump dropped every stored LLM debrief, and auto-debrief only
+  rewrites the latest session. Found in the plan review.
+- **Payload, still schema 1.** Only added fields: `badge`, `heading`, `meta`, `facts` (stat
+  tiles: label, value, note, tone), `headline` and `numbers` (the small panel),
+  `issuesTitle` (the fight page's wording), `moreCount`, `session.strip` (every analyzed fight,
+  oldest first), and `session.problems[].severity` is now the worst one across the problem's
+  fights (computed in `overlay.py`; the app's session page is unchanged). GvG facts count only
+  kills and deaths inside rounds, like its result line. The new addon falls back to `title`
+  and `resultLine` with an older app.
+- **The addon stays a dumb renderer.** Every fact comes from the app. The addon writes labels
+  and composes a few lines from the app's numbers, and a wording change there needs an addon
+  update:
+  - labels: the tab names, "NEXT TIME", "WENT WELL", "Fights", "click to open a fight",
+    "Recording", "Not recording", "Not connected", "Start", "Stop", "Latest", "Open debrief",
+    "Debrief, worded by the local LLM", and the empty and error states;
+  - from numbers: the session tiles ("40 fights", Kills, Deaths, KDR with two decimals),
+    "3 of 7 · 2 lost", "4 of 7 fights", "<name> · 48:12 of fighting", "N more in the app",
+    "N more · hides when combat starts", "Fight n of N", "Analyzing (N queued)".
+  (Listing corrected after the review, plan 15.)
+- **Drawing is platform-independent.** `addon/src/view` uses `arcdps-imgui` directly (the same
+  0.8.0 with `tables-api` that nexus-rs uses, so the types are shared) and runs on Linux.
+  `ui.rs` and `addon.rs` keep the Nexus glue. Decisions that aren't drawing are plain, tested
+  functions: which cards start open, the small panel's rules, the settings migration.
+- **Preview without the game.** `cargo run --example preview` runs the same view code in a
+  headless ImGui context and turns the draw data into PNGs with a small CPU rasterizer (vertex
+  color times the atlas alpha, clip rectangles, alpha blending; no new dependency). Layout,
+  wrapping, sizes and colors match; Nexus's renderer and UI scale don't.
+- **Look ("A, cards", agreed on mockups).** No native title bar; a header band with the queue,
+  the recording state with Start/Stop and Close ("Not connected" without the app). A tab
+  switch, then a fixed result block (badge, map, time and length, four stat tiles) over a
+  scrolling list. One card per issue: critical and major open, minor and context one line;
+  with nothing serious the first card opens. A click toggles a card, kept per fight while the
+  game runs. Colors and sizes are in `view/theme.rs`. Default size 460 by 600 (a saved size is
+  kept: the window id is unchanged), minimum 360 by 200.
+- **Fonts.** Inter Regular and SemiBold, static TTFs subset to Latin and Latin Extended
+  (about 40 KB each), embedded in the DLL; the OFL text ships as `bin/addon/Inter-OFL.txt`.
+  Six sizes (Regular 12, 13; SemiBold 11, 13, 15, 18) go to Nexus with
+  `FontDataOwnedByAtlas = false`, so ImGui never frees the embedded bytes. Nexus hands back
+  raw `ImFont` pointers, kept in atomics (a callback may come while the addon's lock is held)
+  and pushed with `igPushFont`; until then the current font is used. A change of the game's
+  interface size resizes them (`resize_font`).
+- **Tiles that don't fit.** A tile's note goes on its label line ("Squad · +2 allies"); a value
+  too wide drops to 15 px, then wraps at spaces onto more lines (`21W 12L` / `5E 2S`); only a
+  single word too wide is clipped. (An ellipsis first; it hid the losses at 360 wide. Plan 15.)
+- **Small panel after a fight.** A second window, sized to its content, movable, no focus on
+  appearing and no keyboard navigation. It shows once a new fight is analyzed, the player is
+  out of combat, the full window is closed and the payload already has the new fight. Combat,
+  dismiss, Open debrief or opening the full window hide it; it comes back only for a newer
+  fight.
+- **"After a fight" setting**: small panel (default), full window, or nothing. It replaces
+  "Show the window when a new fight is analyzed": a saved `false` becomes nothing, anything
+  else the small panel; the other options are kept. An unknown value falls back to the
+  default without resetting the rest.
+- **Validation.**
+  - Corpus (142 fights, zerg mode) before and after: 16 fights changed, 13 that were out of
+    severity order and 3 where a minor note replaced a context note in the top five. Summaries
+    (apart from `topIssue`, `topSeverity`, `analyzerVersion`), positives and the set of issues
+    are identical in every fight.
+  - Python: the ranker order, a version bump keeping the debrief, the new payload fields (zerg
+    and GvG facts, strip, worst severity, old fields kept), the regenerated fixture; all tests
+    and ruff pass.
+  - Rust (Linux): parsing with and without the new fields, default-open cards, capitalizing a
+    fact, the small panel's rules, the settings migration; clippy clean for Linux and
+    `x86_64-pc-windows-msvc`. The preview draws every state without a panic and was compared
+    with the mockups by eye (win, loss with a card opened by click, clean win, no fights, app
+    not running, a problem, 360 wide, five open cards scrolling, long titles, an older app,
+    the session tab with 7 and 40 fights, the small panel).
+  - Not yet checked in game: sharp fonts at the UI scale, dragging by the header, the small
+    panel without keyboard focus and hiding in combat, scrolling and resizing, the options and
+    the settings migration, frame time.
+
+## Overlay redesign: review fixes (2026-11-25)
+
+Plan 15. A full review of plan 14 (performance, security and use cases; Opus reviewers) found
+two medium and four low issues; all are fixed. Analysis output is unchanged.
+
+- **The session strip scrolls (F1).** It sat fixed above the list, so a long session or a short
+  window (90 fights at 360 by 420) left the recurring problems no room at all. Only the tiles
+  stay fixed now, like the fight tab's result block. Decided with the user.
+- **Fonts handed to Nexus live on the heap (F2).** The font bytes (`FontDataOwnedByAtlas =
+  false`), the glyph ranges and the font config pointed into the DLL's static data. If Nexus
+  keeps a font after the addon is unloaded or hot-reloaded, a later atlas rebuild would read
+  freed memory and crash the game. They are now heap copies that are never freed (about
+  80 KB per load). Whether Nexus actually keeps them is unknown (its font manager isn't in this
+  checkout); the copies are safe either way.
+- **Long unspaced words are cut in one pass (F3).** The old cut re-measured each prefix,
+  roughly cubic: a 1,800-character LLM debrief line cost about 11 ms per frame. It now adds up
+  character advances (ImGui 1.80 has no kerning).
+- **Tile values wrap (F4)** instead of the ellipsis, see "Tiles that don't fit". Decided with
+  the user.
+- **The addon-written strings are listed (F5)** under "The addon stays a dumb renderer".
+- **Two wrong comments (F6)**: chip padding, and the window style's lifetime.
+- **Validation.** New Rust tests: a 10,000-character word cut into fitting pieces with nothing
+  lost in under 500 ms (debug build), a too-wide tile value wrapping at spaces, the heap copies
+  holding the same bytes away from the statics. Preview: a 90-fight session at 360 by 420
+  scrolls to its problems; the record wraps at 360 and 460. pytest, ruff, cargo test, clippy for
+  Linux and Windows, the preview and the DLL build pass. Not checked in game.
+
 ## My play: personal improvement hints (2026-11-25)
 
-Plan: [`plans/14-player-improvement.md`](plans/14-player-improvement.md). Hints for one player
+Plan: [`plans/16-player-improvement.md`](plans/16-player-improvement.md). Hints for one player
 (any account in the logs), for a fight, a session or many fights, from the user's own logs only.
 
 - **Facts at analysis time, rules at request time.** The analysis worker writes one
@@ -832,7 +942,7 @@ Plan: [`plans/14-player-improvement.md`](plans/14-player-improvement.md). Hints 
   row's value, the median and count of same-spec, same-job peers and the squad median. The rest
   of the squad's downs are stored per row as compact tuples, without the row's own account, so a
   rule never needs another row. `coach/` reads only these rows, so thresholds change without a
-  re-analysis. `ANALYZER_VERSION` 8. Which row a squad down belongs to is kept in
+  re-analysis. `ANALYZER_VERSION` 9 (8 is the notes order from the overlay redesign). Which row a squad down belongs to is kept in
   `Timeline.squad_down_keys`, outside the stored series.
 - **A rule is a comparison, never a bare share.** "Clearly above the squad" is an exact tail
   probability at the squad's rate in the same fights (Poisson for the down rate, binomial for a

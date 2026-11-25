@@ -1,6 +1,8 @@
 # WvW Analyzer: personal improvement ("My play") plan
 
-> **Status:** implemented 2026-11-25 (see `DECISIONS.md`, "My play"). Deviations: a row's job
+> **Status:** implemented 2026-11-25 (see `DECISIONS.md`, "My play"). Written as plan 14;
+> renumbered 16 on merging, as 14 and 15 went to the overlay redesign, and `ANALYZER_VERSION`
+> became 9 (8 went to its notes order). Deviations: a row's job
 > uses a relative bar (25% of the squad's strong players) instead of `player_outliers`'
 > absolute minimums, and peers' medians are stored per job so the main job is judged in every
 > fight on a spec; "clearly above" is an exact tail test plus a ratio or margin; after the

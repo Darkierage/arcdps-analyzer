@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "version": "0.5.0",
+  "version": "0.7.0",
   "recording": {
     "active": false,
     "logDirOk": true
@@ -11,7 +11,7 @@
   },
   "latest": {
     "id": 2,
-    "addedAt": "2026-11-21T01:02:51"
+    "addedAt": "2026-11-25T22:36:50"
   },
   "session": {
     "id": 1,
@@ -49,6 +49,18 @@
       }
     ],
     "strengths": [],
+    "strip": [
+      {
+        "id": 1,
+        "result": "loss",
+        "letter": "L"
+      },
+      {
+        "id": 2,
+        "result": "loss",
+        "letter": "L"
+      }
+    ],
     "recording": false,
     "latestId": 2
   },
@@ -60,6 +72,38 @@
     "title": "20:00  Seared Borderlands  1:00",
     "resultLine": "Result: loss - 0 kills for 4 deaths, 10 vs 20 enemies, 1:00.",
     "framing": null,
+    "badge": "LOSS",
+    "heading": "Seared Borderlands",
+    "meta": "20:00 \u00b7 1:00 long",
+    "facts": [
+      {
+        "label": "Kills",
+        "value": "0",
+        "note": "",
+        "tone": "good"
+      },
+      {
+        "label": "Deaths",
+        "value": "4",
+        "note": "",
+        "tone": "bad"
+      },
+      {
+        "label": "Squad",
+        "value": "10",
+        "note": "",
+        "tone": ""
+      },
+      {
+        "label": "Enemies",
+        "value": "20",
+        "note": "",
+        "tone": ""
+      }
+    ],
+    "headline": "0 kills for 4 deaths",
+    "numbers": "10 vs 20",
+    "issuesTitle": "Why this fight was lost",
     "issues": [
       {
         "severity": "major",
@@ -80,6 +124,7 @@
         "fix": "More strip builds; strip right before our bomb."
       }
     ],
+    "moreCount": 0,
     "positives": [],
     "debrief": [
       "Result: loss",

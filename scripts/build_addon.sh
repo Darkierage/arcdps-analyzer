@@ -18,4 +18,6 @@ cd addon
 cargo xwin build --release --target x86_64-pc-windows-msvc "$@"
 mkdir -p ../bin/addon
 cp target/x86_64-pc-windows-msvc/release/WvWAnalyzer.dll ../bin/addon/WvWAnalyzer.dll
+# The DLL embeds Inter; its license ships next to it (the installer bundles bin/addon).
+cp assets/fonts/OFL.txt ../bin/addon/Inter-OFL.txt
 echo "built bin/addon/WvWAnalyzer.dll"

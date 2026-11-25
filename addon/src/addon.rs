@@ -2,11 +2,14 @@
 
 use crate::client::{Client, PORTS};
 use crate::ui::App;
+use crate::view::theme::{self, Font, GLYPH_RANGES};
 use nexus::{
     AddonFlags, UpdateProvider,
     data_link::mumble::{UiState, get_mumble_link},
+    data_link::read_nexus_link,
+    font::{add_font_from_memory, font_receive, resize_font},
     gui::{RenderType, register_render, render},
-    imgui::Ui,
+    imgui::{Ui, sys},
     keybind::{keybind_handler, register_keybind_with_string},
     paths::get_addon_dir,
     quick_access::add_quick_access,
@@ -14,7 +17,7 @@ use nexus::{
 };
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 nexus::export! {
     name: "WvW Analyzer",
@@ -52,6 +55,57 @@ fn with_app(what: &str, f: impl FnOnce(&mut App)) {
     }
 }
 
+/// The UI scale the fonts were last sized for (f32 bits).
+static FONT_SCALE: AtomicU32 = AtomicU32::new(0);
+
+/// Nexus's UI scale (the game's interface size), 1 until Nexus reports one.
+fn ui_scale() -> f32 {
+    read_nexus_link().map(|l| l.scaling).filter(|s| s.is_finite() && *s > 0.2).unwrap_or(1.0)
+}
+
+/// Hands Inter to Nexus at each size of the type scale. Nexus adds them to its atlas and calls
+/// back with each `ImFont`; until then the view keeps the current font.
+fn register_fonts(scale: f32) {
+    // Everything Nexus keeps a pointer to is a heap copy that is never freed (about 80 KB per
+    // load): Nexus may rebuild its atlas from it after this DLL is unloaded or reloaded. The atlas
+    // must not own (and free) the font bytes.
+    let regular = theme::leak_copy(theme::INTER_REGULAR);
+    let semibold = theme::leak_copy(theme::INTER_SEMIBOLD);
+    let ranges = theme::leak_copy(&GLYPH_RANGES);
+    // SAFETY: ImGui's constructor sets the defaults; the struct is copied into a leaked Box and
+    // ImGui's own allocation is destroyed right away.
+    let config: &'static sys::ImFontConfig = unsafe {
+        let raw = sys::ImFontConfig_ImFontConfig();
+        let mut copy = std::ptr::read(raw);
+        sys::ImFontConfig_destroy(raw);
+        copy.FontDataOwnedByAtlas = false;
+        copy.GlyphRanges = ranges.as_ptr();
+        Box::leak(Box::new(copy))
+    };
+    let receive = font_receive!(|id, font| {
+        if let Some(f) = Font::from_id(id) {
+            theme::set_font(f, font.map(|p| p as *mut sys::ImFont));
+        }
+    });
+    for f in Font::ALL {
+        let data = if f.semibold() { semibold } else { regular };
+        add_font_from_memory(f.id(), data, f.size() * scale, Some(config), receive)
+            .revert_on_unload();
+    }
+    FONT_SCALE.store(scale.to_bits(), Ordering::Relaxed);
+}
+
+/// Resizes the fonts when the player changes the game's interface size.
+fn follow_scale(scale: f32) {
+    let last = f32::from_bits(FONT_SCALE.load(Ordering::Relaxed));
+    if (scale - last).abs() > 0.01 {
+        FONT_SCALE.store(scale.to_bits(), Ordering::Relaxed);
+        for f in Font::ALL {
+            resize_font(f.id(), f.size() * scale);
+        }
+    }
+}
+
 fn in_combat() -> bool {
     get_mumble_link().is_some_and(|m| m.read_ui_state().contains(UiState::IS_IN_COMBAT))
 }
@@ -64,7 +118,11 @@ fn load() {
 
     register_render(
         RenderType::Render,
-        render!(|ui: &Ui| with_app("render", |app| app.render(ui, in_combat()))),
+        render!(|ui: &Ui| {
+            let scale = ui_scale();
+            follow_scale(scale);
+            with_app("render", |app| app.render(ui, in_combat(), scale))
+        }),
     )
     .revert_on_unload();
     register_render(
@@ -84,13 +142,18 @@ fn load() {
     )
     .revert_on_unload();
 
+    register_fonts(ui_scale());
     load_texture_from_memory(ICON, ICON_PNG, None);
     add_quick_access(QUICK_ACCESS, ICON, ICON, KEYBIND, "WvW Analyzer").revert_on_unload();
     log::info!("loaded");
 }
 
 fn unload() {
-    // Render callbacks, keybind and Quick Access are removed by revert_on_unload.
+    // Render callbacks, keybind, fonts and Quick Access are removed by revert_on_unload; the
+    // font pointers are forgotten so nothing draws with a released font.
+    for f in Font::ALL {
+        theme::set_font(f, None);
+    }
     let app = APP.lock().unwrap_or_else(|e| e.into_inner()).take();
     if let Some(mut app) = app {
         app.save();

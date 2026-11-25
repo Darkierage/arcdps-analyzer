@@ -134,3 +134,21 @@ def test_stacking_boon_generation_has_pct_and_stacks():
     m = compute_metrics(load_fight(d, "x"))
     row = m.players[0]
     assert row["gen_groupBuffs_1122_pct"] == 36.0 and row["gen_groupBuffs_1122"] == 1.5
+
+
+def test_ranker_orders_by_severity_then_impact():
+    from wvw_analyzer.detectors.base import Finding
+    from wvw_analyzer.notes.ranker import rank
+
+    def f(name: str, severity: str, impact: float) -> Finding:
+        # Separate windows: nothing merges.
+        return Finding(detector=name, severity=severity, impact=impact,
+                       window=(impact * 100, impact * 100 + 1))
+
+    out = rank([f("ctx", "info", 9.0), f("maj", "major", 8.0), f("min", "minor", 1.0),
+                f("crit", "critical", 2.0), f("maj2", "major", 3.0), f("min2", "minor", 4.0)])
+    order = [x.detector for x in out["issues"] + out["more"]]
+    # A major with more impact than the critical, and a context note with more impact than
+    # either minor, still come after them.
+    assert order == ["crit", "maj", "maj2", "min2", "min", "ctx"]
+    assert [x.detector for x in out["more"]] == ["ctx"]

@@ -8,6 +8,7 @@
 pub mod client;
 pub mod model;
 pub mod settings;
+pub mod view;
 
 #[cfg(windows)]
 mod addon;

@@ -1,17 +1,15 @@
-//! The in-game window and the addon's options section (ImGui through Nexus).
+//! The Nexus glue around `view`: when the window shows, its settings, and carrying out what
+//! the player clicked. The options section lives here too.
 
-use crate::client::{Client, Command, Snapshot, Status};
-use crate::model::{
-    Fight, NewFights, Overlay, Session, result_color, severity_color, severity_label,
-};
-use crate::settings::Settings;
-use nexus::imgui::{Condition, Slider, TreeNodeFlags, Ui, Window};
+use crate::client::{Client, Command};
+use crate::model::NewFights;
+use crate::settings::{AfterFight, Settings};
+use crate::view::glance::{self, GlanceAction, GlanceRules};
+use crate::view::{self, Action};
+use imgui::{Slider, Ui};
 use std::path::PathBuf;
 
 const GRAY: [f32; 4] = [0.65, 0.65, 0.65, 1.0];
-const RED: [f32; 4] = [1.0, 0.36, 0.36, 1.0];
-const ORANGE: [f32; 4] = [1.0, 0.62, 0.25, 1.0];
-const GREEN: [f32; 4] = [0.4, 0.85, 0.45, 1.0];
 
 pub struct App {
     pub client: Client,
@@ -21,6 +19,8 @@ pub struct App {
     settings_dirty: bool,
     new_fights: NewFights,
     show_when_out_of_combat: bool,
+    view: view::ViewState,
+    glance: GlanceRules,
 }
 
 impl App {
@@ -33,6 +33,8 @@ impl App {
             settings_dirty: false,
             new_fights: NewFights::default(),
             show_when_out_of_combat: false,
+            view: view::ViewState::default(),
+            glance: GlanceRules::default(),
         }
     }
 
@@ -55,7 +57,9 @@ impl App {
         self.client.send(Command::Select(id));
     }
 
-    /// Notice a newly analyzed fight; with auto-show, open on it once out of combat.
+    /// Notice a newly analyzed fight and do what "After a fight" says: show the small panel,
+    /// open the full window on it once out of combat, or nothing. With the full window open, a
+    /// new fight only moves it to the newest fight.
     fn track_new_fights(&mut self, in_combat: bool) {
         let is_new = {
             let snap = self.client.snapshot();
@@ -64,9 +68,20 @@ impl App {
                 None => false,
             }
         };
-        if is_new && self.settings.auto_show {
-            self.show_when_out_of_combat = true;
-            self.client.send(Command::Select(None));
+        if is_new {
+            match self.settings.after_fight {
+                AfterFight::Panel => {
+                    self.glance.new_fight(self.settings.open);
+                    self.view.tab = view::Tab::Fight;
+                    self.client.send(Command::Select(None));
+                }
+                AfterFight::Window => {
+                    self.show_when_out_of_combat = true;
+                    self.view.tab = view::Tab::Fight;
+                    self.client.send(Command::Select(None));
+                }
+                AfterFight::Nothing => {}
+            }
         }
         if self.show_when_out_of_combat && !in_combat {
             self.show_when_out_of_combat = false;
@@ -77,40 +92,63 @@ impl App {
         }
     }
 
-    pub fn render(&mut self, ui: &Ui, in_combat: bool) {
+    pub fn render(&mut self, ui: &Ui, in_combat: bool, scale: f32) {
         self.track_new_fights(in_combat);
+        self.render_glance(ui, in_combat, scale);
         if !self.settings.open || (self.settings.hide_in_combat && in_combat) {
             return;
         }
-        let mut open = true;
-        let mut actions: Vec<Action> = Vec::new();
-        let mut latest = None;
-        Window::new("WvW Analyzer###wvw_analyzer")
-            .opened(&mut open)
-            .size([460.0, 420.0], Condition::FirstUseEver)
-            .bg_alpha(self.settings.opacity)
-            .collapsible(false)
-            .build(ui, || {
-                let snap = self.client.snapshot();
-                latest = snap.data.as_ref().and_then(|d| d.latest.as_ref()).map(|l| l.id);
-                draw(ui, &snap, latest, &mut actions);
-            });
-        for a in actions {
+        let snap = self.client.snapshot();
+        let frame = view::main_window(ui, &mut self.view, &snap, scale, self.settings.opacity);
+        drop(snap);
+        for a in frame.actions {
             match a {
-                Action::Select(id) => self.select(id, latest),
+                Action::Select(id) => self.select(id, frame.latest),
                 Action::Record(on) => self.client.send(Command::SetRecording(on)),
             }
         }
-        if !open {
+        if !frame.open {
             self.settings.open = false;
             self.save();
+        }
+    }
+
+    /// The small panel after a fight, while its rules say so.
+    fn render_glance(&mut self, ui: &Ui, in_combat: bool, scale: f32) {
+        let snap = self.client.snapshot();
+        let latest = snap.data.as_ref().and_then(|d| d.latest.as_ref()).map(|l| l.id);
+        let fight = snap.data.as_ref().and_then(|d| d.fight.as_ref());
+        let ready = fight.is_some_and(|f| Some(f.id) == latest);
+        if !self.glance.update(in_combat, self.settings.open, ready) {
+            return;
+        }
+        let Some(f) = fight else { return };
+        let action = glance::panel(ui, f, scale, self.settings.opacity);
+        drop(snap);
+        match action {
+            Some(GlanceAction::Dismiss) => self.glance.hide(),
+            Some(GlanceAction::OpenDebrief) => {
+                self.glance.hide();
+                self.view.tab = view::Tab::Fight;
+                self.client.send(Command::Select(None));
+                self.settings.open = true;
+                self.save();
+            }
+            None => {}
         }
     }
 
     pub fn render_options(&mut self, ui: &Ui) {
         let before = self.settings.clone();
         ui.text("WvW Analyzer");
-        ui.checkbox("Show the window when a new fight is analyzed", &mut self.settings.auto_show);
+        ui.text("After a fight:");
+        ui.radio_button(
+            "Show a small panel with the result",
+            &mut self.settings.after_fight,
+            AfterFight::Panel,
+        );
+        ui.radio_button("Open the full window", &mut self.settings.after_fight, AfterFight::Window);
+        ui.radio_button("Do nothing", &mut self.settings.after_fight, AfterFight::Nothing);
         ui.checkbox("Hide the window in combat", &mut self.settings.hide_in_combat);
         Slider::new("Background opacity", 0.0, 1.0)
             .display_format("%.2f")
@@ -124,180 +162,6 @@ impl App {
         if self.settings_dirty && !ui.is_any_item_active() {
             self.settings_dirty = false;
             self.save();
-        }
-    }
-}
-
-enum Action {
-    Select(Option<i64>),
-    Record(bool),
-}
-
-fn draw(ui: &Ui, snap: &Snapshot, latest: Option<i64>, actions: &mut Vec<Action>) {
-    match &snap.status {
-        Status::Searching => {
-            ui.text_wrapped("WvW Analyzer isn't running.");
-            ui.text_colored(GRAY, "Start the WvW Analyzer app (0.5.0 or newer) on this PC.");
-            return;
-        }
-        Status::Problem(msg) => {
-            ui.text_wrapped(msg);
-            return;
-        }
-        Status::Connected => {}
-    }
-    let Some(data) = &snap.data else { return };
-    status_line(ui, data, actions);
-    if let Some(err) = &snap.action_error {
-        ui.text_colored(RED, err);
-    }
-    ui.separator();
-    if let Some(_bar) = ui.tab_bar("tabs") {
-        if let Some(_tab) = ui.tab_item("Fight") {
-            match &data.fight {
-                Some(f) => fight_tab(ui, f, latest, actions),
-                None => ui.text_colored(GRAY, "No analyzed fights in this session yet."),
-            }
-        }
-        if let Some(_tab) = ui.tab_item("Session") {
-            match &data.session {
-                Some(s) => session_tab(ui, s),
-                None => ui.text_colored(GRAY, "No sessions yet."),
-            }
-        }
-    }
-}
-
-fn status_line(ui: &Ui, data: &Overlay, actions: &mut Vec<Action>) {
-    if data.recording.active {
-        ui.text_colored(GREEN, "Recording");
-        ui.same_line();
-        if ui.small_button("Stop") {
-            actions.push(Action::Record(false));
-        }
-    } else {
-        ui.text_colored(GRAY, "Not recording");
-        ui.same_line();
-        if ui.small_button("Start recording") {
-            actions.push(Action::Record(true));
-        }
-    }
-    if data.queue.busy || data.queue.pending > 0 {
-        ui.same_line();
-        let queued = if data.queue.pending > 0 {
-            format!("  Analyzing ({} queued)", data.queue.pending)
-        } else {
-            "  Analyzing...".to_string()
-        };
-        ui.text_colored(GRAY, queued);
-    }
-}
-
-fn fight_tab(ui: &Ui, f: &Fight, latest: Option<i64>, actions: &mut Vec<Action>) {
-    // Navigation: older < Fight n of N > newer, Latest.
-    if let Some(prev) = f.prev_id {
-        if ui.small_button("<") {
-            actions.push(Action::Select(Some(prev)));
-        }
-    } else {
-        ui.text_colored(GRAY, " ");
-    }
-    ui.same_line();
-    match f.index {
-        Some(i) => ui.text(format!("Fight {i} of {}", f.count)),
-        None => ui.text("Fight"),
-    }
-    if let Some(next) = f.next_id {
-        ui.same_line();
-        if ui.small_button(">") {
-            actions.push(Action::Select(Some(next)));
-        }
-    }
-    // Browsing anything but the current session's newest fight (maybe in an older session).
-    if latest.is_some_and(|id| id != f.id) {
-        ui.same_line();
-        if ui.small_button("Latest") {
-            actions.push(Action::Select(None));
-        }
-    }
-
-    ui.text(&f.title);
-    for line in f.result_line.lines() {
-        ui.text_colored(result_color(f.result.as_deref()), line);
-    }
-    if let Some(framing) = &f.framing {
-        ui.text_wrapped(framing);
-    }
-    ui.spacing();
-
-    if f.issues.is_empty() {
-        ui.text_colored(GRAY, "No problems found.");
-    }
-    for n in &f.issues {
-        ui.text_colored(severity_color(&n.severity), format!("[{}]", severity_label(&n.severity)));
-        ui.same_line();
-        ui.text_wrapped(&n.title);
-        ui.indent();
-        if !n.short.is_empty() {
-            ui.text_wrapped(&n.short);
-        }
-        if !n.fix.is_empty() {
-            ui.text_colored(GRAY, "Next time:");
-            ui.same_line();
-            ui.text_wrapped(&n.fix);
-        }
-        ui.unindent();
-    }
-    if !f.positives.is_empty() {
-        ui.spacing();
-        for n in &f.positives {
-            ui.text_colored(GREEN, "[Went well]");
-            ui.same_line();
-            ui.text_wrapped(&n.title);
-            if !n.short.is_empty() {
-                ui.indent();
-                ui.text_wrapped(&n.short);
-                ui.unindent();
-            }
-        }
-    }
-    if !f.debrief.is_empty() {
-        ui.spacing();
-        if ui.collapsing_header("Debrief (worded by the local LLM)", TreeNodeFlags::empty()) {
-            for line in &f.debrief {
-                ui.text_wrapped(line);
-            }
-            if f.debrief_unverified > 0 {
-                ui.text_colored(ORANGE, "Some numbers in this debrief couldn't be checked.");
-            }
-        }
-    }
-}
-
-fn session_tab(ui: &Ui, s: &Session) {
-    ui.text(&s.name);
-    if s.recording {
-        ui.same_line();
-        ui.text_colored(GREEN, "(recording)");
-    }
-    ui.text(format!("{} fights: {}   fight time {}", s.fights, s.record, s.duration));
-    ui.text(format!("Kills {}   deaths {}   KDR {:.2}", s.kills, s.deaths, s.kdr));
-    ui.spacing();
-    if !s.problems.is_empty() {
-        ui.text("Recurring problems");
-        for p in &s.problems {
-            ui.text_colored(severity_color(&p.severity), "-");
-            ui.same_line();
-            ui.text_wrapped(format!("{}: {} fights ({} lost)", p.title, p.count, p.losses));
-        }
-    }
-    if !s.strengths.is_empty() {
-        ui.spacing();
-        ui.text("Strengths");
-        for p in &s.strengths {
-            ui.text_colored(GREEN, "-");
-            ui.same_line();
-            ui.text_wrapped(format!("{}: {} fights", p.title, p.count));
         }
     }
 }

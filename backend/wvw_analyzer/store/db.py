@@ -88,6 +88,15 @@ def _dumps(obj: Any) -> str:
     return json.dumps(obj, separators=(",", ":"), default=_json_default)
 
 
+def _without_version(summary: Any) -> Any:
+    """A summary as plain JSON values, minus the analyzer version (for the debrief keep rule)."""
+    if not isinstance(summary, dict):
+        return summary
+    plain = json.loads(_dumps(summary))
+    plain.pop("analyzerVersion", None)
+    return plain
+
+
 def _pack(obj: Any) -> bytes:
     return zlib.compress(_dumps(obj).encode(), 6)
 
@@ -228,12 +237,15 @@ class Database:
             for f in facts or []]
         with self._lock:
             # A stored debrief was worded from the previous notes and summary: keep it only if
-            # the re-analysis produced exactly the same ones.
+            # the re-analysis produced exactly the same ones. The analyzer version isn't part of
+            # the wording, so a version bump alone keeps it.
             old = self._conn.execute(
                 """SELECT f.summary, a.notes FROM fights f JOIN analyses a ON a.fight_id=f.id
                    WHERE f.id=?""", (fight_id,)).fetchone()
-            if old is not None and (old["summary"], old["notes"]) != (_dumps(summary),
-                                                                    _dumps(notes)):
+            if old is not None and (
+                    old["notes"] != notes_json
+                    or _without_version(json.loads(old["summary"] or "null"))
+                    != _without_version(summary)):
                 self._conn.execute(
                     "UPDATE analyses SET debrief=NULL, debrief_at=NULL WHERE fight_id=?",
                     (fight_id,))

@@ -17,7 +17,8 @@ from .notes.templates import render
 
 # Bump when analysis output changes (new columns, detector fixes); stored fights with another
 # version are re-analyzed on startup.
-ANALYZER_VERSION = 8  # 8: per-player facts for the personal review (player_fights)
+ANALYZER_VERSION = 9  # 9: per-player facts for the personal review (player_fights)
+#  8: notes strictly by severity, then impact
 
 
 class Skipped(Exception):
