@@ -66,6 +66,10 @@ CREATE INDEX IF NOT EXISTS player_fights_account ON player_fights(account);
 """
 
 ACTIVE_STATUSES = ("queued", "parsing", "analyzing")
+# A session's own start in the fights' time format ("2026-11-21 18:40:16 +01:00"): it is stored
+# as ISO ("2026-11-21T02:05:00"), and compared as text the "T" sorts after the fights' space, so
+# an empty session started at 02:05 sorted above a session whose fights ran until 18:40.
+SESSION_START = "REPLACE(s.started_at, 'T', ' ')"
 # A session's analyzed fights in time order. Shared by the session summary and the Trends
 # page: the summary's ranking of problems depends on the order, so the two must not differ.
 FIGHT_ORDER = "f.fight_start, f.id"
@@ -172,7 +176,7 @@ class Database:
 
     def sessions(self) -> list[dict[str, Any]]:
         rows = self._all(
-            """SELECT s.*,
+            f"""SELECT s.*,
                  COUNT(f.id) AS fights,
                  SUM(f.status='done') AS analyzed,
                  SUM(f.result='win') AS wins,
@@ -181,7 +185,8 @@ class Database:
                  MIN(f.fight_start) AS first_fight,
                  MAX(f.fight_start) AS last_fight
                FROM sessions s LEFT JOIN fights f ON f.session_id = s.id
-               GROUP BY s.id ORDER BY COALESCE(MAX(f.fight_start), s.started_at) DESC""")
+               GROUP BY s.id ORDER BY COALESCE(MAX(f.fight_start), {SESSION_START}) DESC,
+               s.id DESC""")
         return rows
 
     # ---- fights ---------------------------------------------------------------------------

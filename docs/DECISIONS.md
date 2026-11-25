@@ -1045,6 +1045,22 @@ Plan: [`plans/16-player-improvement.md`](plans/16-player-improvement.md). Hints 
     Settings in the split and the hints, the 404); no analysis output changed, so no
     re-analysis.
 
+## Overlay showed an empty session (2026-11-26)
+
+Found while testing the redesigned overlay in game: with no recording running, it showed no
+fights at all.
+
+- **Cause.** The overlay takes the top of the Sessions list, which sorts sessions by their last
+  fight's start, or by their own start when they have no fight. The two are stored in different
+  formats ("2026-11-21 18:40:16 +01:00" and "2026-11-21T02:05:00") and were compared as text,
+  where the "T" sorts after the space. So two recordings started and stopped without a fight at
+  02:05 sorted above the raid whose fights ran until 18:40, on the Sessions page too.
+- **Fix.** The session start is compared in the fights' format (`SESSION_START` in
+  `store/db.py`), ties go to the newer session, and the overlay skips sessions without an
+  analyzed fight unless it is recording one.
+- **Validated:** `tests/test_overlay_api.py` (empty sessions earlier the same day, and an empty
+  session that really is newer); it fails on the code before the fix.
+
 ## Open items at the time of writing
 
 - The Trends page has its first slice only (results per session). Not built: problems across

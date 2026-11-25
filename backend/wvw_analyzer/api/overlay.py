@@ -114,11 +114,13 @@ def _worst(occurrences: list[dict[str, Any]], fallback: str) -> str:
 
 
 def _session_id(state: AppState) -> int | None:
-    """The recording session, else the session with the most recent fight."""
+    """The recording session, else the session with the most recent analyzed fight (a session
+    left empty, e.g. a recording started and stopped without a fight, is skipped)."""
     if state.recorder.session_id is not None:
         return state.recorder.session_id
     sessions = state.db.sessions()
-    return sessions[0]["id"] if sessions else None
+    with_fights = next((s["id"] for s in sessions if s["analyzed"]), None)
+    return with_fights if with_fights is not None else (sessions[0]["id"] if sessions else None)
 
 
 def _done_fights(state: AppState, session_id: int) -> list[dict[str, Any]]:

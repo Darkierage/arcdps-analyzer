@@ -205,3 +205,28 @@ def test_session_problems_carry_their_worst_severity(tmp_path: Path):
         for p, r in zip(problems, agg["recurringIssues"], strict=False):
             assert p["title"] == r["title"]
             assert p["severity"] == _worst(r["occurrences"], r["severity"])
+
+
+def test_empty_sessions_dont_hide_the_latest_fights(tmp_path: Path):
+    # Two recordings started and stopped without a fight, at 02:05 on the day of a raid that
+    # ran until the evening: the overlay showed the empty one (its ISO start sorted above the
+    # fights' times as text), so it had no data.
+    client, state = make_client(tmp_path)
+    with client:
+        raid = state.db.create_session("Raid", "recording")
+        add_fight(state, raid, "a")
+        state.db.end_session(raid)
+        state.db._exec("UPDATE fights SET fight_start='2026-11-17 20:00:00 +01:00'")
+        for _ in range(2):
+            empty = state.db.create_session("Empty", "recording")
+            state.db.end_session(empty)
+            state.db._exec("UPDATE sessions SET started_at='2026-11-17T02:05:00' WHERE id=?",
+                           (empty,))
+        assert state.db.sessions()[0]["id"] == raid  # 20:00 is later than 02:05
+        assert client.get("/api/overlay").json()["session"]["id"] == raid
+        # An empty session that really is newer still sorts first, but the overlay skips it.
+        newer = state.db.create_session("Later", "recording")
+        state.db.end_session(newer)
+        assert state.db.sessions()[0]["id"] == newer
+        p = client.get("/api/overlay").json()
+        assert p["session"]["id"] == raid and p["session"]["fights"] == 1
