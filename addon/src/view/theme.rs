@@ -154,7 +154,7 @@ impl Font {
         Font::ALL.into_iter().find(|f| f.id() == id)
     }
 
-    fn index(self) -> usize {
+    pub fn index(self) -> usize {
         Font::ALL.iter().position(|f| *f == self).unwrap_or(0)
     }
 }
@@ -166,6 +166,26 @@ static FONTS: [AtomicUsize; 6] = [const { AtomicUsize::new(0) }; 6];
 /// Stores a font Nexus (or the preview) handed over; None forgets it.
 pub fn set_font(font: Font, ptr: Option<*mut sys::ImFont>) {
     FONTS[font.index()].store(ptr.map_or(0, |p| p as usize), Ordering::Release);
+}
+
+/// The pixel size a loaded font is drawn at (its built size times any global font scale), or
+/// None before it is handed over.
+pub fn loaded_size(font: Font) -> Option<f32> {
+    let ptr = FONTS[font.index()].load(Ordering::Acquire) as *const sys::ImFont;
+    if ptr.is_null() {
+        return None;
+    }
+    // SAFETY: as in `font`; only called on the render thread, with the context current.
+    let size = unsafe { (*ptr).FontSize * (*ptr).Scale * (*sys::igGetIO()).FontGlobalScale };
+    (size.is_finite() && size > 0.0).then_some(size)
+}
+
+/// How much larger than asked Nexus builds a font (`got` pixels for `asked`), or 1 when the
+/// numbers make no sense. Nexus can add its own scaling on top of the size an addon asks for;
+/// the overlay then asks for less, so text keeps the mockups' size against the layout.
+pub fn font_factor(asked: f32, got: f32) -> f32 {
+    let k = got / asked;
+    if k.is_finite() && (0.5..=4.0).contains(&k) { k } else { 1.0 }
 }
 
 /// Pushes `font` until the token is dropped. Without it (not handed over yet) the current font
@@ -221,6 +241,15 @@ impl Metrics {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn font_factor_is_the_extra_scaling_or_one() {
+        assert!((font_factor(21.6, 32.4) - 1.5).abs() < 0.001); // 150% Windows scaling
+        assert_eq!(font_factor(13.0, 13.0), 1.0);
+        assert_eq!(font_factor(0.0, 13.0), 1.0); // nothing asked yet
+        assert_eq!(font_factor(13.0, 130.0), 1.0); // not a scaling: leave the size alone
+        assert_eq!(font_factor(13.0, f32::NAN), 1.0);
+    }
 
     #[test]
     fn heap_copies_hold_the_same_bytes_outside_the_dll_statics() {

@@ -1,7 +1,9 @@
 # WvW Analyzer: overlay redesign review fixes
 
 > **Status:** approved 2026-11-25 (user: "fix all what is needed", with the recommended options
-> for F1 and F4); implemented 2026-11-25, as planned. Not checked in game; not committed yet.
+> for F1 and F4); implemented and committed 2026-11-25, as planned. A first look in game
+> (2026-11-26) found the fonts built too large by Nexus and a flooded Nexus.log; both fixed
+> after this plan, see DECISIONS "Overlay: first look in game".
 
 ## Context
 

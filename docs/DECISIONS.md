@@ -869,7 +869,10 @@ Plan 14. Players use the overlay most, and it read as flat, compressed text.
   `FontDataOwnedByAtlas = false`, so ImGui never frees the embedded bytes. Nexus hands back
   raw `ImFont` pointers, kept in atomics (a callback may come while the addon's lock is held)
   and pushed with `igPushFont`; until then the current font is used. A change of the game's
-  interface size resizes them (`resize_font`).
+  interface size resizes them (`resize_font`). Nexus may build a font larger than asked
+  (in game: 1.5 times, Windows scaling at 150% with Nexus's DPI scaling on), while the layout uses the UI scale
+  alone; the addon measures that factor on the first font it gets back and asks for that much
+  less, so text keeps the mockups' size against the spacing. See "Overlay: first look in game".
 - **Tiles that don't fit.** A tile's note goes on its label line ("Squad · +2 allies"); a value
   too wide drops to 15 px, then wraps at spaces onto more lines (`21W 12L` / `5E 2S`); only a
   single word too wide is clipped. (An ellipsis first; it hid the losses at 360 wide. Plan 15.)
@@ -1060,6 +1063,30 @@ fights at all.
   analyzed fight unless it is recording one.
 - **Validated:** `tests/test_overlay_api.py` (empty sessions earlier the same day, and an empty
   session that really is newer); it fails on the code before the fix.
+
+## Overlay: first look in game (2026-11-26)
+
+A capture of the game window (the overlay on the Fight tab, at 4K with interface size Larger and
+Windows scaling at 150%) matched the mockups in look and layout, with two problems:
+
+- **Text too large for the layout.** The 15 px heading ("Eternal Battlegrounds", 129 px wide
+  in the preview at scale 1) was 320 px wide, 2.48 times, while the spacing was at Nexus's UI
+  scale (about 1.67). So Nexus builds registered fonts 1.5 times the asked size: Windows scaling
+  is 150% and Nexus's DPI scaling is on (its font manager isn't in this checkout). A first
+  estimate of 1.22, from fitting the text to Inter with another renderer, was wrong; compare
+  with the preview, which uses ImGui's own text metrics. Tiles and titles wrapped early ("Squad · +22 allies" on three lines). Fix: the addon measures
+  the factor once (built size times ImGui's global font scale, against the size it asked for,
+  from a font as first added) and then asks for every size divided by it; a factor outside 0.5
+  to 4 is ignored. Measuring once avoids a resize loop.
+- **Nexus.log flooded.** nexus-rs sets the log level to Trace, so ureq's debug and trace lines
+  (a hex dump of every overlay request, every 2 s) filled the log: 7,953 of 8,073 lines in
+  8 minutes, about 8 MB an hour. There since the first addon (plan 5). Fix: `load()` caps the
+  level at Info; nexus-rs's `log_filter` feature would do the same with a much larger DLL.
+- **Validation.** A Rust test for the factor; cargo test, clippy for Linux and Windows and the
+  DLL build pass. In game after the fix: Nexus.log reports "Nexus builds fonts 1.50x the asked
+  size", the heading is 212 px wide (1.64 times the preview, against a layout scale of 1.67),
+  the Squad tile's label takes two lines at 360 wide, and the addon wrote no debug or trace
+  lines.
 
 ## Open items at the time of writing
 

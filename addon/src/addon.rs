@@ -55,8 +55,18 @@ fn with_app(what: &str, f: impl FnOnce(&mut App)) {
     }
 }
 
-/// The UI scale the fonts were last sized for (f32 bits).
-static FONT_SCALE: AtomicU32 = AtomicU32::new(0);
+/// The size each font was last asked for (f32 bits; index = `Font::index`).
+static ASKED: [AtomicU32; 6] = [const { AtomicU32::new(0) }; 6];
+/// How much larger than asked Nexus builds fonts (f32 bits; 0 = not measured yet).
+static FONT_FACTOR: AtomicU32 = AtomicU32::new(0);
+
+fn load_f32(a: &AtomicU32) -> f32 {
+    f32::from_bits(a.load(Ordering::Relaxed))
+}
+
+fn store_f32(a: &AtomicU32, v: f32) {
+    a.store(v.to_bits(), Ordering::Relaxed);
+}
 
 /// Nexus's UI scale (the game's interface size), 1 until Nexus reports one.
 fn ui_scale() -> f32 {
@@ -89,19 +99,37 @@ fn register_fonts(scale: f32) {
     });
     for f in Font::ALL {
         let data = if f.semibold() { semibold } else { regular };
+        store_f32(&ASKED[f.index()], f.size() * scale);
         add_font_from_memory(f.id(), data, f.size() * scale, Some(config), receive)
             .revert_on_unload();
     }
-    FONT_SCALE.store(scale.to_bits(), Ordering::Relaxed);
+    store_f32(&FONT_FACTOR, 0.0);
 }
 
-/// Resizes the fonts when the player changes the game's interface size.
+/// Keeps the fonts at the type scale times the UI scale. Nexus may build a font larger than
+/// asked (seen in game: 1.5 times, Windows scaling at 150% with Nexus's DPI scaling on), while the layout uses the UI
+/// scale alone; the first font handed over gives that factor, and every font is then asked for
+/// that much less. Also follows the player changing the game's interface size. Called each frame
+/// on the render thread.
 fn follow_scale(scale: f32) {
-    let last = f32::from_bits(FONT_SCALE.load(Ordering::Relaxed));
-    if (scale - last).abs() > 0.01 {
-        FONT_SCALE.store(scale.to_bits(), Ordering::Relaxed);
-        for f in Font::ALL {
-            resize_font(f.id(), f.size() * scale);
+    let mut factor = load_f32(&FONT_FACTOR);
+    if factor == 0.0 {
+        // Measured once, from a font as first added (never from a resized one).
+        let Some((f, got)) = Font::ALL.into_iter().find_map(|f| Some((f, theme::loaded_size(f)?)))
+        else {
+            return;
+        };
+        factor = theme::font_factor(load_f32(&ASKED[f.index()]), got);
+        store_f32(&FONT_FACTOR, factor);
+        if (factor - 1.0).abs() > 0.01 {
+            log::info!("Nexus builds fonts {factor:.2}x the asked size; asking for less");
+        }
+    }
+    for f in Font::ALL {
+        let size = f.size() * scale / factor;
+        if (size - load_f32(&ASKED[f.index()])).abs() > 0.01 {
+            store_f32(&ASKED[f.index()], size);
+            resize_font(f.id(), size);
         }
     }
 }
@@ -111,6 +139,9 @@ fn in_combat() -> bool {
 }
 
 fn load() {
+    // nexus-rs forwards every level to Nexus.log; ureq's debug and trace lines (a hex dump of
+    // each overlay request) would grow it by megabytes an hour.
+    log::set_max_level(log::LevelFilter::Info);
     FAILED.store(false, Ordering::Relaxed);
     let settings_path = get_addon_dir("WvWAnalyzer").ok().map(|d| d.join("settings.json"));
     *APP.lock().unwrap_or_else(|e| e.into_inner()) =
