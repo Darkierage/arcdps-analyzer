@@ -54,6 +54,29 @@ impl Image {
     }
 }
 
+/// The box around everything drawn (the windows): each command's vertices, clipped to its clip
+/// rectangle, so content scrolled out of a list doesn't count.
+pub fn drawn_box(data: &DrawData) -> ([f32; 2], [f32; 2]) {
+    let (mut lo, mut hi) = ([f32::MAX; 2], [0.0f32; 2]);
+    for list in data.draw_lists() {
+        let vtx = list.vtx_buffer();
+        let idx = list.idx_buffer();
+        for cmd in list.commands() {
+            let DrawCmd::Elements { count, cmd_params } = cmd else { continue };
+            let clip = cmd_params.clip_rect;
+            for &i in &idx[cmd_params.idx_offset..cmd_params.idx_offset + count] {
+                let p = vtx[cmd_params.vtx_offset + i as usize].pos;
+                for k in 0..2 {
+                    let v = p[k].clamp(clip[k], clip[k + 2]);
+                    lo[k] = lo[k].min(v);
+                    hi[k] = hi[k].max(v);
+                }
+            }
+        }
+    }
+    (lo, hi)
+}
+
 /// Draws all of ImGui's draw lists into `img`. The font atlas is texture 1; other textures
 /// (none are used today) draw as plain vertex color.
 pub fn draw(img: &mut Image, data: &DrawData, atlas: &Atlas) {
@@ -95,13 +118,11 @@ fn triangle(
     let min_x = p.iter().map(|q| q[0]).fold(f32::MAX, f32::min).max(clip[0]).max(0.0);
     let min_y = p.iter().map(|q| q[1]).fold(f32::MAX, f32::min).max(clip[1]).max(0.0);
     let max_x = p.iter().map(|q| q[0]).fold(f32::MIN, f32::max).min(clip[2]).min(img.width as f32);
-    let max_y =
-        p.iter().map(|q| q[1]).fold(f32::MIN, f32::max).min(clip[3]).min(img.height as f32);
+    let max_y = p.iter().map(|q| q[1]).fold(f32::MIN, f32::max).min(clip[3]).min(img.height as f32);
     if min_x >= max_x || min_y >= max_y {
         return;
     }
-    let col: Vec<[f32; 4]> =
-        v.iter().map(|x| x.col.map(|c| c as f32 / 255.0)).collect();
+    let col: Vec<[f32; 4]> = v.iter().map(|x| x.col.map(|c| c as f32 / 255.0)).collect();
     // Top-left fill rule, so pixels on an edge shared by two triangles are drawn once.
     let sign = area.signum();
     let bias = |a: [f32; 2], b: [f32; 2]| -> f32 {
@@ -116,7 +137,11 @@ fn triangle(
             if c[0] < clip[0] || c[0] >= clip[2] || c[1] < clip[1] || c[1] >= clip[3] {
                 continue;
             }
-            let w = [edge(p[1], p[2], c) / area, edge(p[2], p[0], c) / area, edge(p[0], p[1], c) / area];
+            let w = [
+                edge(p[1], p[2], c) / area,
+                edge(p[2], p[0], c) / area,
+                edge(p[0], p[1], c) / area,
+            ];
             if w.iter().zip(biases).any(|(wi, b)| *wi + b < 0.0) {
                 continue;
             }

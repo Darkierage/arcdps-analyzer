@@ -180,36 +180,6 @@ impl Overlay {
     }
 }
 
-/// RGBA colors for severities and results.
-pub fn severity_color(severity: &str) -> [f32; 4] {
-    match severity {
-        "critical" => [1.0, 0.36, 0.36, 1.0],
-        "major" => [1.0, 0.62, 0.25, 1.0],
-        "minor" => [0.95, 0.85, 0.35, 1.0],
-        "positive" => [0.4, 0.85, 0.45, 1.0],
-        _ => [0.7, 0.7, 0.7, 1.0],
-    }
-}
-
-pub fn result_color(result: Option<&str>) -> [f32; 4] {
-    match result {
-        Some("win") => [0.4, 0.85, 0.45, 1.0],
-        Some("loss") => [1.0, 0.36, 0.36, 1.0],
-        Some("even") => [0.95, 0.85, 0.35, 1.0],
-        _ => [0.7, 0.7, 0.7, 1.0],
-    }
-}
-
-pub fn severity_label(severity: &str) -> &'static str {
-    match severity {
-        "critical" => "Critical",
-        "major" => "Major",
-        "minor" => "Minor",
-        "positive" => "Went well",
-        _ => "Context",
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

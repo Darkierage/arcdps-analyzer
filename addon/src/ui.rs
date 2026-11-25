@@ -18,6 +18,7 @@ pub struct App {
     settings_dirty: bool,
     new_fights: NewFights,
     show_when_out_of_combat: bool,
+    view: view::ViewState,
 }
 
 impl App {
@@ -30,6 +31,7 @@ impl App {
             settings_dirty: false,
             new_fights: NewFights::default(),
             show_when_out_of_combat: false,
+            view: view::ViewState::default(),
         }
     }
 
@@ -63,6 +65,7 @@ impl App {
         };
         if is_new && self.settings.auto_show {
             self.show_when_out_of_combat = true;
+            self.view.tab = view::Tab::Fight;
             self.client.send(Command::Select(None));
         }
         if self.show_when_out_of_combat && !in_combat {
@@ -74,13 +77,13 @@ impl App {
         }
     }
 
-    pub fn render(&mut self, ui: &Ui, in_combat: bool) {
+    pub fn render(&mut self, ui: &Ui, in_combat: bool, scale: f32) {
         self.track_new_fights(in_combat);
         if !self.settings.open || (self.settings.hide_in_combat && in_combat) {
             return;
         }
         let snap = self.client.snapshot();
-        let frame = view::main_window(ui, &snap, self.settings.opacity);
+        let frame = view::main_window(ui, &mut self.view, &snap, scale, self.settings.opacity);
         drop(snap);
         for a in frame.actions {
             match a {
