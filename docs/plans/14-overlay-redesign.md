@@ -1,7 +1,13 @@
 # WvW Analyzer: in-game overlay redesign plan
 
 > **Status:** approved 2026-11-25, amended after a plan review the same day (debriefs survive a
-> version bump, tiles that don't fit, fonts in practice, small-panel rules); not implemented yet.
+> version bump, tiles that don't fit, fonts in practice, small-panel rules); implemented
+> 2026-11-25 in 0.7.0, not yet checked in game. Deviations: the windows themselves are built in
+> `view` (not `ui.rs`), so the preview draws exactly what the game does; a collapsed card has
+> the mockup's 8 px padding (10 when open); the header name and tile labels use Regular 12 (the
+> mockups had SemiBold 12 and 11 px); a tile value cut after the 15 px step ends at a whole word
+> with an ellipsis, and a four-result session record (`21W 12L 5E 2S`) shows that way even at
+> 460 wide; the old color helpers in `model.rs` were removed.
 
 ## Context
 

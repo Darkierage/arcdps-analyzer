@@ -88,10 +88,18 @@ real GvG logs.
 
 ## In-game overlay (Nexus addon)
 
-The overlay shows the analyzer's results in game: the latest fight (result line, ranked notes
-with their fixes, what went well, the LLM debrief if one was written), older fights of the
-session with **<** / **>**, the session summary (record, kills and deaths, recurring problems,
-strengths) and a **Start / Stop recording** button.
+The overlay shows the analyzer's results in game:
+
+- **Fight tab:** the latest fight's result, map and length, its numbers (kills, deaths, squad,
+  enemies; GvG: rounds and players) and one card per issue, critical and major first. Critical
+  and major cards are open (the fact, then *Next time* and the fix); minor and context notes
+  are one line you can click open. Then what went well and the LLM debrief, if one was written.
+  Older fights of the session with **<** / **>**, back to the newest with **Latest**.
+- **Session tab:** record, kills, deaths and KDR, one square per fight (click one to open it),
+  the recurring problems with how often they showed up, and the strengths.
+- **After a fight:** a small panel with the result and the top three problems. It hides when
+  combat starts; **Open debrief** opens the full window on that fight.
+- A **Start / Stop** recording button in the window's header.
 
 - **Requirements:** [Raidcore Nexus](https://raidcore.gg/Nexus) (it also loads arcdps), and
   WvW Analyzer 0.5.0 or newer running on the same PC. Players using arcdps without Nexus aren't
@@ -102,8 +110,10 @@ strengths) and a **Start / Stop recording** button.
   and nothing else. **Remove** deletes that DLL and the addon's settings folder. After an app
   upgrade the addon is updated on the next start while the game is closed, or with **Update**.
 - **In game:** the Quick Access icon or **ALT+SHIFT+W** (rebindable in Nexus) toggles the
-  window. Options in Nexus → Addons → WvW Analyzer: open the window when a new fight has been
-  analyzed (only once you're out of combat), hide it in combat, background opacity.
+  window; drag it by its header. Options in Nexus → Addons → WvW Analyzer: *After a fight*
+  (show the small panel, open the full window, or do nothing; only once you're out of combat),
+  hide the window in combat, background opacity. The text uses Inter and follows the game's
+  interface size.
 - **Timing:** a fight shows up once the app has analyzed its log, usually within half a minute
   of the fight ending. The window follows the current session; while you browse older fights,
   **Latest** goes back to the newest one.
@@ -187,8 +197,13 @@ set `LLVM_BIN` if they aren't on `PATH`):
 
 ```bash
 scripts/build_addon.sh                         # -> bin/addon/WvWAnalyzer.dll
-cd addon && cargo test && cargo clippy         # model, client and settings tests run on Linux
+cd addon && cargo test && cargo clippy         # model, client, settings and view tests run on Linux
+cd addon && cargo run --example preview        # every overlay state as PNGs in addon/target/preview/
 ```
+
+The preview draws the overlay with the addon's own drawing code in a headless ImGui and a small
+CPU rasterizer, from synthetic payloads. It shows layout, wrapping and colors without the game;
+it is not pixel-identical to it.
 
 From WSL, the Windows `GuildWars2EliteInsights-CLI.exe` runs through interop. It needs the
 .NET 10 runtime on Windows. Dev data (config, DB, EI cache) lives in `./data`.
@@ -253,8 +268,15 @@ The version comes from `backend/wvw_analyzer/__init__.py`.
 - `backend/wvw_analyzer/llm`: llama-server lifecycle and debrief prompt
 - `backend/wvw_analyzer/api`: FastAPI REST and WebSocket; serves the built UI
 - `backend/wvw_analyzer/addon_install.py`: install, update and remove the in-game overlay
-- `addon/`: the in-game overlay, a Rust Nexus addon (nexus-rs)
+- `addon/`: the in-game overlay, a Rust Nexus addon (nexus-rs); `src/view` draws it,
+  `examples/preview` renders it to images
 - `frontend/`: SvelteKit + Tailwind + ECharts
 - `scripts/`: tool setup, calibration, addon and Windows builds
 - `packaging/`: PyInstaller spec, Inno Setup script, icon
 - `docs/`: decisions (`DECISIONS.md`) and the approved plans (`plans/`)
+
+## Credits
+
+- The in-game overlay uses the [Inter](https://rsms.me/inter/) typeface by The Inter Project
+  Authors, under the SIL Open Font License 1.1 (`addon/assets/fonts/OFL.txt`, shipped as
+  `bin/addon/Inter-OFL.txt`). It is subset to Latin and Latin Extended.
