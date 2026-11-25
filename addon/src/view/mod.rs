@@ -3,6 +3,7 @@
 //! what the player clicked as [`Action`]s; `ui.rs` carries them out.
 
 pub mod fight;
+pub mod glance;
 pub mod rules;
 pub mod session;
 pub mod states;
@@ -343,7 +344,7 @@ fn tab_row(
         }
         Tab::Session => {
             if let Some(s) = &data.session {
-                session::meta(ui, m, s, x0 + pill_w + m.px(12.0), right, y, row_h);
+                session::meta(ui, s, x0 + pill_w + m.px(12.0), right, y, row_h);
             }
         }
     }

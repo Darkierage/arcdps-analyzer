@@ -350,18 +350,36 @@ pub fn stat_tiles(ui: &Ui, m: &Metrics, pos: [f32; 2], width: f32, facts: &[Fact
             Font::Heading15
         };
         let color = theme::fact_color(&f.tone);
-        let vy = pos[1] + pad_y + ((value_h - text_size(ui, font, &f.value)[1]) / 2.0).floor();
+        let value = fit(ui, font, &f.value, inner);
+        let vy = pos[1] + pad_y + ((value_h - text_size(ui, font, &value)[1]) / 2.0).floor();
         {
             // One draw list at a time: imgui-rs panics on a second one.
             let _f = theme::font(ui, font);
             let dl = ui.get_window_draw_list();
             dl.with_clip_rect_intersect([x, pos[1]], [max[0] - pad_x / 2.0, max[1]], || {
-                dl.add_text([(x + pad_x).round(), vy.round()], color, &f.value);
+                dl.add_text([(x + pad_x).round(), vy.round()], color, &value);
             });
         }
         label.draw(ui, [x + pad_x, pos[1] + pad_y + value_h], theme::MUTED);
     }
     tile_h
+}
+
+/// `s` as is when it fits in `width`, else cut after its last whole word that fits, with an
+/// ellipsis ("21W 12L 5E…"), so a clipped value never ends mid-letter.
+pub fn fit(ui: &Ui, font: Font, s: &str, width: f32) -> String {
+    let _f = theme::font(ui, font);
+    if ui.calc_text_size(s)[0] <= width {
+        return s.to_string();
+    }
+    let words: Vec<&str> = s.split(' ').collect();
+    for n in (1..words.len()).rev() {
+        let cut = format!("{}…", words[..n].join(" "));
+        if ui.calc_text_size(&cut)[0] <= width {
+            return cut;
+        }
+    }
+    s.to_string() // one word: the clip rectangle cuts it
 }
 
 /// A thin bar for a share, 0..1.

@@ -26,6 +26,41 @@ fn main_window(name: &str, size: [f32; 2], snap: Snapshot, view: ViewState) -> S
     }
 }
 
+/// The small panel after a fight, for the payload's fight.
+fn glance(name: &str, v: Value) -> State {
+    let fight = Overlay::parse(&v.to_string()).expect("payload parses").fight.expect("fight");
+    State {
+        name: name.into(),
+        size: None,
+        draw: Box::new(move |ui| {
+            view::glance::panel(ui, &fight, 1.0, 1.0);
+        }),
+    }
+}
+
+/// A long session: the strip wraps, the record has every result.
+fn many() -> Value {
+    let mut v = win();
+    let s = &mut v["session"];
+    let results = ["win", "loss", "even", "skirmish"];
+    let strip: Vec<Value> = (0..40)
+        .map(|i| {
+            let r = results[(i * 7 + i / 3) % 4];
+            json!({"id": i + 1, "result": r, "letter": &r[..1].to_uppercase()})
+        })
+        .collect();
+    s["strip"] = json!(strip);
+    s["fights"] = json!(40);
+    s["record"] = json!("21W 12L 5E 2S");
+    s["kills"] = json!(1874);
+    s["deaths"] = json!(1203);
+    s["problems"][0]["title"] =
+        json!("Stability gap during enemy bomb, again and again in the second half");
+    s["problems"][0]["count"] = json!(17);
+    s["problems"][3]["severity"] = json!("info");
+    v
+}
+
 fn connected(v: Value) -> Snapshot {
     let data = Overlay::parse(&v.to_string()).expect("preview payload parses");
     Snapshot { status: Status::Connected, data: Some(data), action_error: None }
@@ -251,5 +286,18 @@ pub fn all() -> Vec<State> {
         main_window("long-360", [360.0, 600.0], connected(long()), ViewState::default()),
         main_window("old-app", [460.0, 500.0], connected(old_app()), ViewState::default()),
         main_window("session", [460.0, 560.0], connected(win()), session_view),
+        main_window("session-many", [460.0, 600.0], connected(many()), {
+            let mut v = ViewState::default();
+            v.tab = Tab::Session;
+            v
+        }),
+        main_window("session-360", [360.0, 600.0], connected(many()), {
+            let mut v = ViewState::default();
+            v.tab = Tab::Session;
+            v
+        }),
+        glance("glance", win()),
+        glance("glance-clean", clean()),
+        glance("glance-long", long()),
     ]
 }
