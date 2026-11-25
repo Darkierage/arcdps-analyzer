@@ -15,8 +15,11 @@ crate-type = ["cdylib", "rlib"]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 ureq = { version = "3", default-features = false, features = ["json"] }
+# The ImGui bindings nexus-rs uses (same version and features, so the types are shared). A direct
+# dependency so the drawing code in `view` builds and runs on Linux too (tests, the preview).
+imgui = { package = "arcdps-imgui", version = "0.8.0", features = ["tables-api"] }
 
-# The Nexus glue only builds for Windows; model, client and settings are tested on Linux too.
+# The Nexus glue only builds for Windows; model, client, settings and view are tested on Linux.
 # No "panic" features: they show a message box over the game. Panics are caught in addon.rs.
 [target.'cfg(windows)'.dependencies]
 nexus = { git = "https://github.com/zerthox/nexus-rs", rev = "51bff5ab38ad11332316448b452ece1b773018cd", default-features = false, features = ["mumble", "log"] }
