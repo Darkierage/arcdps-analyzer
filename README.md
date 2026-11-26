@@ -194,26 +194,114 @@ Personal hints are built only from your logs, with no outside data (no builds, n
 
 ## Replay and videos
 
-- **Replay tab** (fight page): every player on the map at the replay's time, with downs and
-  deaths, facing, the commander's tag, a party highlight and "follow tag". Wheel to zoom, drag to
-  pan. Eternal Battlegrounds, the Alpine and Desert Borderlands and Edge of the Mists use Elite
-  Insights' map images (a one-time download of about 8 MB, from the Replay tab or Settings);
-  other maps show a grid in game units.
-- **Jump to a moment:** click the Debrief's fight timeline, or a **▶ Replay** link on a finding
-  or a down. The replay opens 3 s earlier (Settings > Replay and videos). The address keeps the
-  moment (`?tab=replay&t=83`).
-- **Videos:** link recordings on a session's **Videos** tab: recordings in your Videos folder
-  whose time covers the session are suggested, or pick a file. Files stay where they are. Each
-  video plays on every fight it covers, in sync with the replay; several videos show side by
-  side (click a small one to make it the main one). The start time comes from the file name
-  (OBS, NVIDIA and Game Bar names) or the file's creation time, about ±1 s; fix it once per
-  video with **−0.5s / +0.5s** or **Sync here** (scrub the video to the moment the replay shows,
-  then save). HEVC recordings may not play: remux to MP4 in OBS or record with H.264 / AV1.
-- **OBS connection (optional):** in OBS, Tools > WebSocket Server Settings > Enable, then copy
-  the port and password into Settings > Replay and videos. The app's Record button (and
-  auto-record with the game) then starts and stops OBS recording, and each recording links
-  itself to its fights. The app only stops recordings it started, and only talks to OBS on this
-  PC.
+Watch any fight again on the map, and, when you have a recording of it, the video at the same
+moment. Recordings can be linked by hand, or by the app itself when it is connected to OBS.
+
+### Replay a fight
+
+1. Open a fight and pick the **Replay** tab. It works for every fight, also older ones.
+2. **Play / Pause** (space), **◀ 5s / 5s ▶** (← / →), speed 0.5× to 4×, or drag the slider.
+3. On the map:
+   - dots are players in their profession's color, ringed blue (squad), green (allies not in
+     the squad) or red (enemies; the logs don't name them, so they show their spec);
+   - an orange ring is a downed player, ✕ a dead one, the yellow diamond the commander's tag,
+     and the small tick the way your squad and allies face;
+   - hover a dot for the name, scroll to zoom, drag to pan, **Fit** to see the squad again,
+     **Follow tag** to keep the commander in the middle, and pick a party to dim the others.
+4. Eternal Battlegrounds, the Alpine and Desert Borderlands and Edge of the Mists can show the
+   real map: click **download the map images** under the map (about 8 MB, once; also in
+   Settings > Replay and videos). Seared Borderlands has no map image and shows a grid. On every
+   map, the bar bottom left shows a distance in game units ("range").
+
+**Jump to a moment:** click anywhere on the Debrief's fight timeline, or a **▶ Replay** link
+on a finding, in the Positioning tab's downs or on the You tab. The replay opens 3 s before the
+moment (change it in Settings > Replay and videos). Back returns to where you clicked, and the
+address keeps the moment, so a reload or a copied link opens it there.
+
+### Set up OBS (optional, once)
+
+With OBS connected, the app's **Record** button starts and stops OBS, and every recording links
+itself to its fights. OBS 28 or newer has what's needed built in; no plugin.
+
+1. In OBS: **Tools > WebSocket Server Settings**, tick **Enable WebSocket server**, **Apply**.
+2. Still there, click **Show Connect Info** and copy the **Server Port** and **Server Password**.
+3. In the app: **Settings > Replay and videos > OBS connection**. Tick **Connect to OBS**, enter
+   the port (usually 4455) and paste the password.
+4. Click **Test connection**: it should say "Connected to OBS" and its version. Then **Save**.
+
+The header now shows the OBS state next to the Record button: **OBS ready**, **OBS recording**,
+**OBS paused**, **OBS not running** or **OBS: password?**. The app only talks to OBS on this PC
+(127.0.0.1), and the password stays in your settings file; the app never shows it again.
+
+### A raid evening with OBS
+
+1. Start OBS with your usual scene.
+2. Press **Record** in the app (or let auto-record start it with the game). OBS starts
+   recording too.
+3. Play.
+4. Press **Stop** in the app (or close the game when auto-record is on). OBS stops, and the
+   recording is linked to every fight it covers.
+5. Open a fight > **Replay**: the map and your video, at the same moment.
+
+Good to know:
+
+- The app only stops a recording it started. If you start recording in OBS yourself, the app
+  links it but leaves it running.
+- Pausing in OBS and OBS splitting long recordings into several files are both handled.
+- If the app was closed while OBS kept recording, the next start shows "OBS is still recording
+  from the last session" with **Stop OBS recording** and **Keep recording**.
+- Two switches in Settings: **Start and stop OBS recording with the app's recording** (off: you
+  start OBS yourself), and **Link OBS recordings to their fights automatically (also ones you
+  start in OBS)** (off: only the ones the app starts are linked).
+
+### Without OBS: link recordings yourself
+
+Any recorder works: NVIDIA ShadowPlay, Windows Game Bar, OBS without the connection, or a video
+a squad mate sends you.
+
+1. Open the session and pick the **Videos** tab.
+2. **Recordings from this session** lists the videos in your Videos folder (and one level of
+   subfolders) whose time covers the session's fights. Click **Link**, or **Link all** (it shows how
+   many). Other folders: Settings > Replay and videos > Recording folders.
+3. Or click **Choose video files…** (in the app window), or paste a file's path and **Add path**.
+4. Give it a label if you like ("Me", a squad mate's name).
+
+The app reads the start time from the file name (OBS, NVIDIA and Game Bar names) or the file's
+creation time, to about a second. Videos stay where they are: the app never copies, changes or
+deletes them, and **Unlink** only removes the link. Fights with a linked video show a camera icon
+in the fight lists.
+
+### Fix the sync
+
+A video can be a second or two off, or more for a squad mate's video (their PC clock or time
+zone differs). Fix it once per video; it then fits every fight in that video.
+
+- **−0.5s / +0.5s** (on the Replay tab or the session's Videos tab) moves the video in half
+  seconds.
+- **Sync here** fixes it exactly: in the replay, go to a moment you can recognize in the video
+  (a down is easy: click its ▲ on the timeline), click **Sync here** on the video, scrub the
+  video with its own controls to that same moment, and click **Save sync**.
+
+A video marked **approximate** may be further off: use Sync here on it.
+
+### Several videos
+
+All videos that cover a fight play side by side, in step: one big, the others small. Click a
+small one to make it the big one; only the big one has sound. **Map / Video / Both** switches
+what the Replay tab shows.
+
+### When something is off
+
+| You see | Why | What to do |
+|---|---|---|
+| **OBS not running** in the header | OBS is closed, or its WebSocket server is off | Start OBS; check Tools > WebSocket Server Settings |
+| **OBS: password?** | The password is missing or wrong | Copy it again from Show Connect Info, paste it in Settings, Save |
+| The video stays dark with a note about its format | The window can't read it: often HEVC / H.265, or a container it can't open | In OBS: File > Remux Recordings to MP4 (fixes the container), or record with H.264 or AV1 (fixes HEVC) |
+| The video is a few seconds off | Times in file names are to the second; another PC's clock | −0.5s / +0.5s or Sync here |
+| **file not found** on a video, or "could not be loaded" on the Replay tab | The recording was moved or renamed | Unlink it and link it again from its new place |
+| "starts … after / ends … before this moment" on a video | That recording doesn't cover this moment | Nothing; another video or fight may have it |
+| No camera icon on a fight | No linked video covers its time | Link the recording on the session's Videos tab |
+| The map shows a grid | Seared Borderlands, or the map images aren't downloaded | Download them in Settings > Replay and videos |
 
 ## LLM debrief tuning
 
