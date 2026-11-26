@@ -9,11 +9,14 @@
 		downs,
 		href,
 		onpick,
+		onreplay,
 		showFight = false
 	}: {
 		downs: PlayerDown[];
 		href?: (d: PlayerDown) => string;
 		onpick?: (d: PlayerDown) => void;
+		/** The fight page: a ▶ button opening the replay at the down. */
+		onreplay?: (d: PlayerDown) => void;
 		showFight?: boolean;
 	} = $props();
 </script>
@@ -30,6 +33,11 @@
 						<a class="text-sm font-medium hover:text-accent" href={href(d)}>{d.hint.title}</a>
 					{:else}
 						<span class="text-sm font-medium">{d.hint.title}</span>
+					{/if}
+					{#if onreplay}
+						<button class="flex items-center gap-1 text-xs text-accent hover:underline" title="Watch this down in the replay" onclick={() => onreplay?.(d)}>
+							<Icon name="play" class="size-3" /> Replay
+						</button>
 					{/if}
 					{#if showFight}<span class="text-xs text-faint">{dateLabel(d.start)} {timeOfDay(d.start)}{d.map ? ` · ${d.map}` : ''}</span>{/if}
 				</div>

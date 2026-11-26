@@ -7,7 +7,11 @@
 
 	/** One player in one fight: each down with its hint, the numbers next to the peers here,
 	 * what hit them and their top skills. One fight never claims a habit. */
-	let { review, onpick }: { review: PlayerReview; onpick: (d: PlayerDown) => void } = $props();
+	let {
+		review,
+		onpick,
+		onreplay
+	}: { review: PlayerReview; onpick: (d: PlayerDown) => void; onreplay?: (d: PlayerDown) => void } = $props();
 	const f = $derived(review.fight!);
 	const pct = (x: number | undefined) => (x == null ? '–' : `${Math.round(x * 100)}%`);
 </script>
@@ -67,7 +71,7 @@
 					{#if f.firstRank}You were the {f.firstRank}{f.firstRank === 1 ? 'st' : f.firstRank === 2 ? 'nd' : f.firstRank === 3 ? 'rd' : 'th'} player to go down.{/if}
 					Click a down to see it on your charts.
 				</p>
-				<DownList downs={f.downs} {onpick} />
+				<DownList downs={f.downs} {onpick} {onreplay} />
 				<p class="mt-2 text-[11px] text-faint">One fight shows what happened, not a habit: My play compares many fights.</p>
 			{:else}
 				<p class="text-sm text-muted">You didn't go down in this fight.</p>

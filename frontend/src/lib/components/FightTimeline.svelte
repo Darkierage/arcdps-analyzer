@@ -12,7 +12,7 @@
 	import { CanvasRenderer } from 'echarts/renderers';
 	import type { Timeline } from '#lib/api.ts';
 	import { compact, duration } from '#lib/format.ts';
-	import { eventsSection, secondsPerPixels, trackPointer } from '#lib/timelineEvents.ts';
+	import { eventsSection, playheadX, secondsPerPixels, trackClicks, trackPointer } from '#lib/timelineEvents.ts';
 
 	use([
 		LineChart,
@@ -33,7 +33,9 @@
 		highlight = null,
 		party = 'squad',
 		professions = {},
-		height = 420
+		height = 420,
+		onseek,
+		playhead = null
 	}: {
 		timeline: Timeline;
 		highlight?: [number, number] | null;
@@ -41,6 +43,10 @@
 		/** Player name -> profession, for the death lines in the tooltip. */
 		professions?: Record<string, string>;
 		height?: number;
+		/** Click on the chart: the fight second clicked (the replay jumps there). */
+		onseek?: (t: number) => void;
+		/** Fight second to mark with a vertical line (the replay's position). */
+		playhead?: number | null;
 	} = $props();
 
 	let el: HTMLDivElement;
@@ -334,9 +340,16 @@
 	onMount(() => {
 		chart = init(el, undefined, { renderer: 'canvas' });
 		pointerX = trackPointer(chart);
+		trackClicks(chart, () => onseek);
+		chart.on('datazoom', () => {
+			zoomed++;
+		});
 		chart.on('legendselectchanged', (e: any) => (legend = { ...e.selected }));
 		chart.setOption(option());
-		ro = new ResizeObserver(() => chart?.resize());
+		ro = new ResizeObserver(() => {
+			chart?.resize();
+			zoomed++; // the playhead moves with the axis
+		});
 		ro.observe(el);
 	});
 
@@ -349,10 +362,23 @@
 		chart?.setOption(option(), { notMerge: true });
 	});
 
+	// The playhead is a line over the chart, moved without re-rendering the chart (it changes
+	// every frame while the replay plays).
+	let zoomed = $state(0);
+	const headX = $derived.by(() => {
+		void zoomed;
+		return playheadX(chart, playhead, 40);
+	});
+
 	onDestroy(() => {
 		ro?.disconnect();
 		chart?.dispose();
 	});
 </script>
 
-<div bind:this={el} style="height: {height}px" class="w-full"></div>
+<div class="relative w-full">
+	<div bind:this={el} style="height: {height}px" class="w-full {onseek ? 'cursor-pointer' : ''}"></div>
+	{#if headX != null}
+		<div class="pointer-events-none absolute top-6 bottom-2 w-0.5 -translate-x-1/2 rounded bg-white shadow-[0_0_4px_rgba(0,0,0,0.8)]" style="left: {headX}px"></div>
+	{/if}
+</div>

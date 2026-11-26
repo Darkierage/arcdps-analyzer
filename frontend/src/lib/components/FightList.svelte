@@ -1,4 +1,5 @@
 <script lang="ts">
+	import Icon from './Icon.svelte';
 	import type { FightRow } from '#lib/api.ts';
 	import { compact, dateLabel, duration, timeOfDay } from '#lib/format.ts';
 	import Badge, { severityBar } from './Badges.svelte';
@@ -30,7 +31,14 @@
 							{#if showDate}<div class="text-xs text-faint">{dateLabel(s?.start ?? f.fight_start) || f.log_name}</div>{/if}
 						</a>
 					</td>
-					<td class="px-3 py-2.5 text-muted"><a href="/fights/{f.id}" class="block">{s?.map ?? f.log_name}</a></td>
+					<td class="px-3 py-2.5 text-muted">
+						<a href="/fights/{f.id}" class="flex items-center gap-1.5">
+							{s?.map ?? f.log_name}
+							{#if f.hasVideo}
+								<span class="text-accent" title="A linked video covers this fight (Replay tab)"><Icon name="video" class="size-3.5" /></span>
+							{/if}
+						</a>
+					</td>
 					<td class="tabular px-3 py-2.5 text-right text-muted">{duration(s?.durationS)}</td>
 					<td class="tabular px-3 py-2.5 text-right">
 						{#if s?.squadCount != null}

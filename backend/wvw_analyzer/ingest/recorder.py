@@ -13,6 +13,7 @@ import re
 import sys
 import threading
 import time
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -81,6 +82,8 @@ class Recorder:
         self._index: tuple[float, dict[str, tuple[Path, int]]] | None = None
         self._game_running = False
         self._auto_suppressed = False  # user pressed Stop while the game was running
+        # Called with True / False when a recording starts / stops (the OBS connection).
+        self.on_change: list[Callable[[bool], None]] = []
 
     # ---- recording ---------------------------------------------------------------------
     @property
@@ -121,6 +124,7 @@ class Recorder:
             self._thread.start()
         log.info("recording started (session %s) watching %s", self.session_id, log_dir)
         self._emit()
+        self._notify(True)
         return self.state()
 
     def stop(self, manual: bool = True, wait: bool = False) -> dict[str, Any]:
@@ -140,11 +144,19 @@ class Recorder:
             self.session_id = None
             self.started_at = None
             self.auto_started = False
+        self._notify(False)  # OBS stops now; the scan below only waits for late logs
         if wait and thread:
             thread.join(timeout=self._drain_s() + 2)
         log.info("recording stopped (session %s)", sid)
         self._emit()
         return self.state()
+
+    def _notify(self, recording: bool) -> None:
+        for cb in self.on_change:
+            try:
+                cb(recording)
+            except Exception:  # a listener must never break recording
+                log.exception("recording listener failed")
 
     def _drain_s(self) -> float:
         """How long a stopped recording keeps waiting for logs that are still being written."""

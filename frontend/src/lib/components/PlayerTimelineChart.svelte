@@ -8,7 +8,7 @@
 	import { CanvasRenderer } from 'echarts/renderers';
 	import type { PlayerSeries, Timeline } from '#lib/api.ts';
 	import { compact, duration } from '#lib/format.ts';
-	import { trackPointer } from '#lib/timelineEvents.ts';
+	import { playheadX, trackClicks, trackPointer } from '#lib/timelineEvents.ts';
 
 	use([LineChart, BarChart, GridComponent, TooltipComponent, LegendComponent, MarkAreaComponent, DataZoomComponent, CanvasRenderer]);
 
@@ -16,12 +16,16 @@
 		series,
 		timeline,
 		highlight = null,
-		height = 460
+		height = 460,
+		onseek,
+		playhead = null
 	}: {
 		series: PlayerSeries;
 		timeline: Timeline;
 		highlight?: [number, number] | null;
 		height?: number;
+		onseek?: (t: number) => void;
+		playhead?: number | null;
 	} = $props();
 
 	let el: HTMLDivElement;
@@ -157,8 +161,15 @@
 	onMount(() => {
 		chart = init(el, undefined, { renderer: 'canvas' });
 		pointerX = trackPointer(chart);
+		trackClicks(chart, () => onseek);
+		chart.on('datazoom', () => {
+			zoomed++;
+		});
 		chart.setOption(option());
-		ro = new ResizeObserver(() => chart?.resize());
+		ro = new ResizeObserver(() => {
+			chart?.resize();
+			zoomed++; // the playhead moves with the axis
+		});
 		ro.observe(el);
 	});
 
@@ -169,10 +180,23 @@
 		chart?.setOption(option(), { notMerge: true });
 	});
 
+	// The playhead is a line over the chart, moved without re-rendering the chart (it changes
+	// every frame while the replay plays).
+	let zoomed = $state(0);
+	const headX = $derived.by(() => {
+		void zoomed;
+		return playheadX(chart, playhead, 40);
+	});
+
 	onDestroy(() => {
 		ro?.disconnect();
 		chart?.dispose();
 	});
 </script>
 
-<div bind:this={el} style="height: {height}px" class="w-full"></div>
+<div class="relative w-full">
+	<div bind:this={el} style="height: {height}px" class="w-full {onseek ? 'cursor-pointer' : ''}"></div>
+	{#if headX != null}
+		<div class="pointer-events-none absolute top-6 bottom-2 w-0.5 -translate-x-1/2 rounded bg-white shadow-[0_0_4px_rgba(0,0,0,0.8)]" style="left: {headX}px"></div>
+	{/if}
+</div>

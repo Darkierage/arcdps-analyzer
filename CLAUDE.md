@@ -64,6 +64,8 @@ cd addon && cargo test && cargo clippy    # addon tests (run on Linux); also car
     (counts, result), `rounds.py`, `aggregate.py` (sessions).
   - `detectors`: one class per rule; `registry.py` lists them.
   - `api/overlay.py` + `addon_install.py`: the overlay payload and installing the addon.
+  - `replay.py`, `videos.py`, `obs.py` (+ `api/replay.py`, `api/videos.py`, `api/obs.py`): the
+    combat replay cache, linked videos and the optional OBS connection (127.0.0.1 only).
   - `addon/`: the Nexus addon. It only renders the strings `/api/overlay` sends; the payload
     shape is pinned by `addon/tests/fixtures/overlay.json` (regenerate with
     `UPDATE_FIXTURES=1 uv run pytest tests/test_overlay_api.py`).
@@ -102,7 +104,7 @@ cd addon && cargo test && cargo clippy    # addon tests (run on Linux); also car
 ## Data and privacy
 
 - **Never modify or delete original arcdps logs.** Imports from outside the log folder are
-  copied to `uploads/`.
+  copied to `uploads/`. Linked videos are only read, never copied, changed or deleted.
 - **File cleanup** only touches files inside the folder next to the database. Tests must use
   temp dirs, never the real data dir.
 - **Never commit** logs, EI JSON, `data/` or player/account names. `data/dev_corpus` (real

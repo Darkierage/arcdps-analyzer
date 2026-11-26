@@ -14,6 +14,7 @@ from .events import EventBus
 from .ingest.processor import Processor
 from .ingest.recorder import Recorder
 from .llm.manager import LlmService
+from .obs import ObsService
 from .store.db import Database
 from .store.files import cleanup_orphans
 
@@ -29,6 +30,8 @@ class AppState:
         self.processor = Processor(self.db, self.config, self.bus)
         self.recorder = Recorder(self.db, self.config, self.bus, self.processor)
         self.llm = LlmService(self.config, self.bus)
+        self.obs = ObsService(self.config, self.db, self.bus, self.recorder)
+        self.recorder.on_change.append(self.obs.on_recording)
         self._stop = threading.Event()
         self._started_at = time.time()
 
@@ -45,6 +48,7 @@ class AppState:
             for fid in stale:
                 self.processor.enqueue(fid)
         self.recorder.start_auto_watch()
+        self.obs.start()
         threading.Thread(target=addon_install.auto_update, args=(self.config.settings.gw2_dir,),
                          name="addon-update", daemon=True).start()
         threading.Thread(target=self._auto_debrief_loop, name="auto-debrief", daemon=True).start()
@@ -53,6 +57,7 @@ class AppState:
         self._stop.set()
         if self.recorder.recording:
             self.recorder.stop(wait=True)
+        self.obs.stop()  # after the recorder: an OBS recording the app started is stopped first
         self.processor.stop()
         self.llm.shutdown(final=True)
 

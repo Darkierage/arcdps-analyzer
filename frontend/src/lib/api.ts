@@ -70,6 +70,8 @@ export interface FightRow {
 	mode: FightMode;
 	created_at: string;
 	updated_at: string;
+	/** A linked video covers this fight (set by the fight lists). */
+	hasVideo?: boolean;
 }
 
 export interface Column {
@@ -375,6 +377,7 @@ export interface AppStatus {
 	eiInstalled: boolean;
 	eiPath: string;
 	llm: LlmStatus;
+	obs?: ObsStatus;
 	dataDir: string;
 	crashes: CrashRecord[];
 }
@@ -558,6 +561,87 @@ export interface ReviewScope {
 	profession?: string;
 }
 
+// ---- combat replay -------------------------------------------------------------------------
+export interface ReplayActor {
+	kind: 'squad' | 'ally' | 'enemy';
+	name: string;
+	account?: string;
+	profession: string;
+	group?: number;
+	commander?: boolean;
+	team?: number;
+	/** First / last position sample (ms into the fight). */
+	start: number;
+	end: number;
+	/** Positions as x0, y0, x1, y1, ... every `pollingMs` from `start`, in replay pixels. */
+	p: number[];
+	/** Facing in degrees, one per position (may be empty). */
+	o: number[];
+	down: [number, number][];
+	dead: [number, number][];
+	dc: [number, number][];
+}
+
+export interface Replay {
+	version: number;
+	durationMs: number;
+	start: string;
+	pollingMs: number;
+	inchToPixel: number;
+	/** Replay pixel space (the map image is drawn at this size). */
+	size: [number, number];
+	map: { key: string | null; hasImage: boolean };
+	actors: ReplayActor[];
+}
+
+// ---- videos ---------------------------------------------------------------------------------
+export type SyncSource = 'obs' | 'filename' | 'filetime' | 'manual';
+
+export interface VideoRow {
+	id: number;
+	path: string | null;
+	name: string;
+	label: string;
+	/** Wall clock (UTC ms) of the first frame. */
+	startMs: number;
+	endMs: number | null;
+	syncSource: SyncSource;
+	approximate: boolean;
+	offsetMs: number;
+	pauses: [number, number][];
+	startedByApp: boolean;
+	exists: boolean;
+	/** Fights of the asked-for session (or fight) it covers. */
+	fightIds?: number[];
+}
+
+export interface VideoSuggestion {
+	path: string;
+	name: string;
+	startMs: number;
+	endMs: number | null;
+	syncSource: SyncSource;
+	fightIds: number[];
+}
+
+export interface FightVideos {
+	/** Wall clock (UTC ms) of the fight's second 0; null if the log has no start time. */
+	fightStartMs: number | null;
+	leadInS: number;
+	videos: VideoRow[];
+}
+
+export interface ObsStatus {
+	enabled: boolean;
+	state: 'off' | 'connecting' | 'offline' | 'auth' | 'error' | 'connected';
+	recording: boolean;
+	paused: boolean;
+	version: string | null;
+	error: string | null;
+	/** A recording the app started is still running from a previous run. */
+	leftover: boolean;
+}
+
 export interface SettingsResponse {
 	settings: any;
 	detectors: DetectorInfo[];
@@ -666,5 +750,24 @@ export const api = {
 		for (const [k, v] of Object.entries(scope)) if (v != null && v !== '') q.set(k, String(v));
 		const qs = q.toString();
 		return request<PlayerReview>('GET', `/api/players/${encodeURIComponent(account)}/review${qs ? `?${qs}` : ''}`);
-	}
+	},
+	replay: (id: number) => request<Replay>('GET', `/api/fights/${id}/replay`),
+	replayMaps: () => request<{ installed: boolean; maps: Record<string, boolean> }>('GET', '/api/replay-maps'),
+	downloadReplayMaps: () =>
+		request<{ installed: boolean; maps: Record<string, boolean> }>('POST', '/api/replay-maps/download'),
+	fightVideos: (id: number) => request<FightVideos>('GET', `/api/fights/${id}/videos`),
+	sessionVideos: (id: number) =>
+		request<{ videos: VideoRow[]; suggestions: VideoSuggestion[]; folders: string[] }>('GET', `/api/sessions/${id}/videos`),
+	addVideo: (path: string, label?: string) => request<VideoRow>('POST', '/api/videos', { path, label: label ?? null }),
+	updateVideo: (id: number, patch: { label?: string; offsetMs?: number; durationMs?: number; manual?: boolean }) =>
+		request<VideoRow>('PATCH', `/api/videos/${id}`, patch),
+	deleteVideo: (id: number) => request<{ ok: boolean }>('DELETE', `/api/videos/${id}`),
+	obsStatus: () => request<ObsStatus>('GET', '/api/obs/status'),
+	obsTest: (body: { port?: number; password?: string }) =>
+		request<{ ok: boolean; version: string | null; error: string | null }>('POST', '/api/obs/test', body),
+	obsLeftover: (action: 'stop' | 'keep') => request<ObsStatus>('POST', '/api/obs/leftover', { action })
 };
+
+/** The video file's URL (served with Range support, by id only). */
+export const videoUrl = (id: number) => `/api/videos/${id}/file`;
+export const replayMapUrl = (key: string) => `/api/replay-maps/${key}`;

@@ -9,13 +9,16 @@
 		rank = null,
 		active = false,
 		onfocus,
-		onstats
+		onstats,
+		onreplay
 	}: {
 		finding: Finding;
 		rank?: number | null;
 		active?: boolean;
 		onfocus?: (w: [number, number] | null) => void;
 		onstats?: (f: FindingFocus) => void;
+		/** Open the Replay tab at a fight second. */
+		onreplay?: (t: number) => void;
 	} = $props();
 
 	const focus = $derived(onstats ? (finding.focus ?? null) : null);
@@ -47,7 +50,7 @@
 				<p><span class="mr-1 font-medium text-accent">Change:</span>{finding.fix}</p>
 			</div>
 		{/if}
-		{#if finding.related.length || (finding.window && onfocus) || focus}
+		{#if finding.related.length || (finding.window && (onfocus || onreplay)) || focus}
 			<div class="mt-3 flex flex-wrap items-center gap-2">
 				{#each finding.related as r}
 					<span class="chip bg-raised text-faint" title="Related finding in the same moment">+ {r}</span>
@@ -68,6 +71,15 @@
 					>
 						<Icon name="target" class="size-3.5" />
 						{active ? 'Clear highlight' : `Show ${duration(finding.window[0])}–${duration(finding.window[1])}`}
+					</button>
+				{/if}
+				{#if finding.window && onreplay}
+					<button
+						class="{focus || onfocus ? '' : 'ml-auto'} flex items-center gap-1.5 text-xs text-accent hover:underline"
+						title="Watch this moment in the replay (and the video, if linked)"
+						onclick={() => finding.window && onreplay?.(finding.window[0])}
+					>
+						<Icon name="play" class="size-3.5" /> Replay
 					</button>
 				{/if}
 			</div>

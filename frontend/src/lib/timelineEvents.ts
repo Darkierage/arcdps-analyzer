@@ -105,3 +105,32 @@ export function secondsPerPixels(chart: Chart | null, x: number, px = 8): number
 	const s = Math.abs(x2 - x);
 	return Number.isFinite(s) && s > 0 ? s : 1;
 }
+
+type SeekChart = Chart & Pick<EChartsType, 'containPixel' | 'on'>;
+
+/** A click on the plot area (not a drag, which pans the zoomed chart) calls the handler that
+ * `handler()` returns with the fight second under the pointer. */
+export function trackClicks(chart: SeekChart, handler: () => ((t: number) => void) | undefined): void {
+	let down: [number, number] | null = null;
+	const zr = chart.getZr();
+	zr.on('mousedown', (e) => {
+		down = [e.offsetX, e.offsetY];
+	});
+	zr.on('click', (e) => {
+		const fn = handler();
+		if (!fn) return;
+		if (down && Math.hypot(e.offsetX - down[0], e.offsetY - down[1]) > 4) return;
+		const p = [e.offsetX, e.offsetY];
+		if (![0, 1, 2].some((g) => chart.containPixel({ gridIndex: g }, p))) return;
+		const t = Number(chart.convertFromPixel({ xAxisIndex: 0 }, e.offsetX));
+		if (Number.isFinite(t)) fn(Math.max(0, t));
+	});
+}
+
+/** Pixel x of fight second `t` on the chart, or null when it is outside the zoomed plot area
+ * (`y` is a pixel row inside the first grid). */
+export function playheadX(chart: SeekChart | null, t: number | null | undefined, y: number): number | null {
+	if (!chart || t == null) return null;
+	const x = Number(chart.convertToPixel({ xAxisIndex: 0 }, t));
+	return Number.isFinite(x) && chart.containPixel({ gridIndex: 0 }, [x, y]) ? x : null;
+}

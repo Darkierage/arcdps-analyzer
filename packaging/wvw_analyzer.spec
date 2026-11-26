@@ -18,6 +18,8 @@ a = Analysis(  # noqa: F821
     pathex=[str(ROOT / "backend")],
     datas=datas,
     hiddenimports=collect_submodules("wvw_analyzer") + collect_submodules("uvicorn")
+    # The OBS connection imports its client inside a function.
+    + collect_submodules("websockets")
     + ["webview.platforms.edgechromium"],
     excludes=["tkinter", "matplotlib", "IPython", "pytest"],
     noarchive=False,

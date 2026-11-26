@@ -141,6 +141,17 @@ class WindowApi:
         result = self._window.create_file_dialog(webview.FileDialog.FOLDER)
         return result[0] if result else None
 
+    def pick_videos(self) -> list[str]:
+        """The video files picked in the system's open dialog (the page can't see paths)."""
+        import webview
+
+        if self._window is None:
+            return []
+        result = self._window.create_file_dialog(
+            webview.FileDialog.OPEN, allow_multiple=True,
+            file_types=("Videos (*.mp4;*.mkv;*.mov;*.webm;*.m4v)", "All files (*.*)"))
+        return list(result or [])
+
 
 def _open_window(url: str, api: WindowApi | None = None) -> bool:
     """Show the app in a native window; False if pywebview isn't available."""

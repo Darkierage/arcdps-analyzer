@@ -554,6 +554,14 @@ def build_report(state: Any, user_agent: str | None = None) -> str:
                  f" {'running' if llm.get('running') else 'not running'})"
                  + (f" - setup error: {llm['setup']['error']}"
                     if (llm.get("setup") or {}).get("error") else ""))
+    try:
+        obs = state.obs.status()
+        setup.append(f"OBS connection: {'on' if obs['enabled'] else 'off'}"
+                     + (f" ({obs['state']}{', recording' if obs['recording'] else ''})"
+                        if obs["enabled"] else "")
+                     + (f" - {obs['error']}" if obs["enabled"] and obs.get("error") else ""))
+    except Exception as e:
+        setup.append(f"OBS connection: check failed ({_summary(e)})")
     setup.append(f"Fight mode for new fights: {s.fight_mode};"
                  f" auto record: {'on' if s.recording.auto_record else 'off'}")
     section("Setup", "\n".join(setup))

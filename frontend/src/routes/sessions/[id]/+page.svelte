@@ -13,6 +13,7 @@
 	import Badge, { severityBar } from '#lib/components/Badges.svelte';
 	import Icon from '#lib/components/Icon.svelte';
 	import PlayerReview from '#lib/components/PlayerReview.svelte';
+	import SessionVideos from '#lib/components/SessionVideos.svelte';
 
 	const id = $derived(Number(page.params.id));
 	let data = $state<SessionDetail | null>(null);
@@ -39,6 +40,7 @@
 		{ id: 'defense', label: 'Defense' },
 		{ id: 'positioning', label: 'Positioning' },
 		{ id: 'fights', label: 'Fights' },
+		{ id: 'videos', label: 'Videos' },
 		{ id: 'you', label: 'You' }
 	];
 
@@ -484,6 +486,8 @@
 			</div>
 		{:else if tab === 'fights'}
 			<FightList fights={data.fights} showDate={false} />
+		{:else if tab === 'videos'}
+			<SessionVideos sessionId={id} fights={data.fights} />
 		{:else if tab === 'you'}
 			<div class="mb-4 flex flex-wrap items-center gap-3">
 				<label class="flex items-center gap-2 text-sm text-muted">

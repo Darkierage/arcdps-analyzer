@@ -11,12 +11,25 @@
 	let saving = $state(false);
 	let dirty = $state(false);
 	let loadedMode = 'zerg'; // fight_mode when the form was loaded (the header switch can change it too)
+	// Video folders, one per line (stored as a list).
+	let folderText = $state('');
+	// A new OBS password typed here; empty keeps the stored one (the page never sees it).
+	let obsPassword = $state('');
+	let obsClear = $state(false);
+	let obsTest = $state<{ ok: boolean; version: string | null; error: string | null } | null>(null);
+	let obsTesting = $state(false);
+	let mapsInstalled = $state<boolean | null>(null);
+	let mapsBusy = $state(false);
 
 	async function load() {
 		try {
 			data = await api.settings();
 			s = $state.snapshot(data.settings);
 			loadedMode = s.fight_mode;
+			folderText = (s.videos?.folders ?? []).join('\n');
+			obsPassword = '';
+			obsClear = false;
+			api.replayMaps().then((m) => (mapsInstalled = m.installed)).catch(() => {});
 			det = Object.fromEntries(allRules(data).map((d) => [d.name, { enabled: d.enabled, ...d.config }]));
 			dirty = false;
 		} catch (e) {
@@ -85,12 +98,20 @@
 				if (Object.keys(diff).length) detectors[d.name] = diff;
 			}
 			const patch: Record<string, any> = { ...s, detectors };
+			patch.videos = { ...s.videos, folders: folderText.split('\n').map((x: string) => x.trim()).filter(Boolean) };
+			patch.obs = { ...s.obs };
+			delete patch.obs.password_set;
+			if (obsPassword) patch.obs.password = obsPassword;
+			else if (obsClear) patch.obs.password = '';
 			// Only send the mode if it was changed here, so a later header toggle isn't undone.
 			if (s.fight_mode === loadedMode) delete patch.fight_mode;
 			data = await api.saveSettings(patch);
 			// detectors is replaced as a whole (not merged) so removed overrides are dropped
 			s = $state.snapshot(data.settings);
 			loadedMode = s.fight_mode;
+			folderText = (s.videos?.folders ?? []).join('\n');
+			obsPassword = '';
+			obsClear = false;
 			dirty = false;
 			await live.refresh();
 			loadOverlay(); // the Guild Wars 2 folder may have changed
@@ -102,6 +123,30 @@
 			toasts.error(e);
 		} finally {
 			saving = false;
+		}
+	}
+
+	async function testObs() {
+		obsTesting = true;
+		obsTest = null;
+		try {
+			obsTest = await api.obsTest({ port: Number(s.obs.port) || undefined, password: obsPassword || (obsClear ? '' : undefined) });
+		} catch (e) {
+			toasts.error(e);
+		} finally {
+			obsTesting = false;
+		}
+	}
+
+	async function downloadMaps() {
+		mapsBusy = true;
+		try {
+			mapsInstalled = (await api.downloadReplayMaps()).installed;
+			toasts.push('Map images downloaded', 'success');
+		} catch (e) {
+			toasts.error(e);
+		} finally {
+			mapsBusy = false;
 		}
 	}
 
@@ -335,6 +380,87 @@
 				In game: the Quick Access icon or <b>ALT+SHIFT+W</b> toggles the window (rebind it in Nexus). Options are under
 				Nexus > Addons > WvW Analyzer.
 			</p>
+		</section>
+
+		<section class="card mb-5 p-5" id="videos">
+			<h2 class="mb-1 flex items-center gap-2 font-semibold"><Icon name="video" class="size-4 text-accent" />Replay and videos</h2>
+			<p class="mb-4 text-sm text-muted">
+				A fight's Replay tab plays the fight on the map and, when a recording covers it, the video at the same moment.
+				Videos are linked on a session's Videos tab and stay where they are: the app never copies or changes them.
+			</p>
+			<div class="grid gap-4 sm:grid-cols-[1fr_12rem]">
+				<div>
+					<label class="label" for="vf">Recording folders (one per line)</label>
+					<textarea id="vf" class="input min-h-16 font-mono text-xs" bind:value={folderText}
+						placeholder={'Empty: your Videos folder\n%USERPROFILE%\\Videos'}></textarea>
+					<p class="mt-1 text-xs text-faint">Searched (with one level of subfolders) for recordings to suggest on a session's Videos tab.</p>
+				</div>
+				<div>
+					<label class="label" for="li">Jump lead-in (s)</label>
+					<input id="li" class="input" type="number" min="0" max="30" step="0.5" bind:value={s.videos.lead_in_s} />
+					<p class="mt-1 text-xs text-faint">A click on the timeline opens the replay this much earlier.</p>
+				</div>
+			</div>
+			<div class="mt-3 flex flex-wrap items-center gap-3 text-sm">
+				<span class="flex items-center gap-1.5">
+					<span class="size-2 rounded-full {mapsInstalled ? 'bg-win' : 'bg-faint'}"></span>
+					Replay map images {mapsInstalled ? 'downloaded' : 'not downloaded'}
+				</span>
+				{#if mapsInstalled === false}
+					<button class="btn !py-1 text-xs" disabled={mapsBusy} onclick={downloadMaps}>{mapsBusy ? 'Downloading…' : 'Download (about 8 MB)'}</button>
+				{/if}
+				<span class="text-xs text-faint">Elite Insights' map images for Eternal Battlegrounds, the Alpine and Desert Borderlands and Edge of the Mists. Other maps show a grid.</span>
+			</div>
+
+			<h3 class="mt-6 mb-1 font-semibold">OBS connection (optional)</h3>
+			<p class="mb-3 text-sm text-muted">
+				With OBS connected, the app's Record button (and auto-record with the game) also starts and stops OBS recording, and
+				each recording is linked to its fights by itself. Without it, link videos by hand. In OBS: <b>Tools → WebSocket
+				Server Settings</b> → Enable WebSocket server, then <b>Show Connect Info</b> for the port and password. The app only
+				connects to OBS on this PC (127.0.0.1).
+			</p>
+			<label class="mb-3 flex items-center gap-2 text-sm">
+				<input type="checkbox" class="accent-accent" bind:checked={s.obs.enabled} /> Connect to OBS
+			</label>
+			<div class="grid gap-4 sm:grid-cols-[8rem_1fr]">
+				<div>
+					<label class="label" for="op">Port</label>
+					<input id="op" class="input" type="number" min="1" max="65535" bind:value={s.obs.port} />
+				</div>
+				<div>
+					<label class="label" for="opw">Password</label>
+					<div class="flex gap-2">
+						<input id="opw" class="input" type="password" autocomplete="off" bind:value={obsPassword}
+							placeholder={s.obs.password_set && !obsClear ? 'Saved (type to change)' : 'From OBS: Show Connect Info'} />
+						{#if s.obs.password_set && !obsClear}
+							<button class="btn" onclick={() => ((obsClear = true), (obsPassword = ''), (dirty = true))} title="Forget the saved password">Clear</button>
+						{/if}
+					</div>
+				</div>
+			</div>
+			<div class="mt-3 space-y-1.5 text-sm">
+				<label class="flex items-center gap-2">
+					<input type="checkbox" class="accent-accent" bind:checked={s.obs.control_recording} />
+					Start and stop OBS recording with the app's recording
+				</label>
+				<p class="ml-6 text-xs text-faint">
+					The app only stops a recording it started; one you start in OBS yourself keeps running.
+				</p>
+				<label class="flex items-center gap-2">
+					<input type="checkbox" class="accent-accent" bind:checked={s.obs.auto_link} />
+					Link OBS recordings to their fights automatically (also ones you start in OBS)
+				</label>
+			</div>
+			<div class="mt-3 flex flex-wrap items-center gap-3">
+				<button class="btn" disabled={obsTesting} onclick={testObs}>{obsTesting ? 'Testing…' : 'Test connection'}</button>
+				{#if obsTest}
+					<span class="text-sm {obsTest.ok ? 'text-win' : 'text-loss'}">
+						{obsTest.ok ? `Connected to OBS ${obsTest.version ?? ''}` : obsTest.error}
+					</span>
+				{:else if live.obs?.enabled}
+					<span class="text-xs text-faint">Now: {live.obs.state}{live.obs.recording ? ', recording' : ''}{live.obs.error ? ` - ${live.obs.error}` : ''}</span>
+				{/if}
+			</div>
 		</section>
 
 		<section class="card mb-5 p-5" id="llm">

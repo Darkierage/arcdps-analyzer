@@ -63,6 +63,22 @@ CREATE TABLE IF NOT EXISTS player_fights (
     PRIMARY KEY (fight_id, key)
 );
 CREATE INDEX IF NOT EXISTS player_fights_account ON player_fights(account);
+-- Linked video recordings (videos.py). The file itself is never copied or changed. Videos are
+-- matched to fights by time, not tied to a session.
+CREATE TABLE IF NOT EXISTS videos (
+    id INTEGER PRIMARY KEY,
+    path TEXT,                                  -- NULL while OBS still writes it (name unknown)
+    label TEXT NOT NULL DEFAULT '',
+    start_ms INTEGER NOT NULL,                  -- wall clock (UTC ms) of the first frame
+    end_ms INTEGER,                             -- NULL: still recording / not known yet
+    sync_source TEXT NOT NULL,                  -- obs | filename | filetime | manual
+    approximate INTEGER NOT NULL DEFAULT 0,
+    offset_ms INTEGER NOT NULL DEFAULT 0,       -- the user's correction (nudge / Sync here)
+    pauses TEXT NOT NULL DEFAULT '[]',          -- JSON [[start_ms, end_ms], ...] (OBS pauses)
+    started_by_app INTEGER NOT NULL DEFAULT 0,  -- OBS recording started by the app's recording
+    created_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS videos_path ON videos(path) WHERE path IS NOT NULL;
 """
 
 ACTIVE_STATUSES = ("queued", "parsing", "analyzing")
@@ -498,3 +514,44 @@ class Database:
         q = ",".join("?" * len(statuses))
         return [r["id"] for r in self._all(f"SELECT id FROM fights WHERE status IN ({q})",
                                            statuses)]
+
+    # ---- videos ---------------------------------------------------------------------------
+    VIDEO_FIELDS = ("path", "label", "start_ms", "end_ms", "sync_source", "approximate",
+                    "offset_ms", "pauses", "started_by_app")
+
+    @staticmethod
+    def _video_row(r: dict[str, Any]) -> dict[str, Any]:
+        r["pauses"] = json.loads(r["pauses"] or "[]")
+        r["approximate"] = bool(r["approximate"])
+        r["started_by_app"] = bool(r["started_by_app"])
+        return r
+
+    def add_video(self, **fields: Any) -> int:
+        cols = [k for k in self.VIDEO_FIELDS if k in fields]
+        vals = [_dumps(fields[k]) if k == "pauses" else fields[k] for k in cols]
+        cur = self._exec(
+            f"INSERT INTO videos({', '.join(cols)}, created_at) "
+            f"VALUES ({', '.join('?' * len(cols))}, ?)", (*vals, _now()))
+        return int(cur.lastrowid)
+
+    def update_video(self, video_id: int, **fields: Any) -> None:
+        cols = [k for k in self.VIDEO_FIELDS if k in fields]
+        if not cols:
+            return
+        vals = [_dumps(fields[k]) if k == "pauses" else fields[k] for k in cols]
+        self._exec(f"UPDATE videos SET {', '.join(f'{k}=?' for k in cols)} WHERE id=?",
+                   (*vals, video_id))
+
+    def video(self, video_id: int) -> dict[str, Any] | None:
+        r = self._one("SELECT * FROM videos WHERE id=?", (video_id,))
+        return self._video_row(r) if r else None
+
+    def video_by_path(self, path: str) -> dict[str, Any] | None:
+        r = self._one("SELECT * FROM videos WHERE path=?", (path,))
+        return self._video_row(r) if r else None
+
+    def videos(self) -> list[dict[str, Any]]:
+        return [self._video_row(r) for r in self._all("SELECT * FROM videos ORDER BY start_ms")]
+
+    def delete_video(self, video_id: int) -> None:
+        self._exec("DELETE FROM videos WHERE id=?", (video_id,))

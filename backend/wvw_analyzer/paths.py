@@ -83,3 +83,10 @@ def default_log_dir() -> Path | None:
         except OSError:
             continue
     return None
+
+
+def default_video_dirs() -> list[Path]:
+    """Where screen recorders save by default: the user's Videos folder (OBS, Game Bar's
+    Captures and NVIDIA's per-game folders sit inside it)."""
+    home = Path.home()
+    return [d for d in (home / "Videos", home / "OneDrive" / "Videos") if d.is_dir()]

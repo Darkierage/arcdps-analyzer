@@ -65,7 +65,10 @@ also shows the standard per-player, per-party and per-squad log stats, like othe
    - Deleting a fight or session also deletes its parsed Elite Insights JSON and any uploaded copy.
      On startup, parsed files no fight references are removed (only inside the folder next to the
      database).
-   - Nothing is sent anywhere, except downloads of the pinned tools and the model.
+   - Nothing is sent anywhere, except downloads of the pinned tools, the model and the replay map
+     images.
+   - Linked videos are only read: never copied, moved, changed or deleted. Unlinking removes the
+     link only.
 10. **UI.** Clean, modern, dark web UI in a native window (pywebview / WebView2). It is consistent
     across pages: one page container width for every page and tab. Big tables scroll inside a
     height-bounded card, so the horizontal scrollbar is always visible; the header, first column and
@@ -1122,6 +1125,104 @@ Validation: a backend test where ranking by the first severity puts the problems
 round (fails without the fix); the preview's newest-fight state keeps the arrow in place at 460
 and 360 wide; pytest, ruff, cargo test, clippy for Linux and Windows and the DLL build pass.
 
+## Combat replay and synced video (2026-11-26)
+
+Plan 17. A fight's **Replay** tab plays the fight on the map and, when a linked recording
+covers it, the video at the same moment; clicks on the fight timeline and "▶ Replay" links jump
+there. An optional OBS connection starts and stops OBS with the app's recording and links the
+files.
+
+- **Replay data: Elite Insights' combat replay, cached per fight.** The EI JSON already has
+  every actor's positions (at the polling rate, in the replay map's pixel space), facing and
+  down / dead / disconnected intervals (`ParseCombatReplay=true` was already set), so old
+  fights replay without a re-parse. It is extracted in the worker process (the EI JSON is tens
+  of MB unpacked) into `<EI JSON name>.replay.json.gz` next to the EI JSON, with the source's
+  size and time inside, so a re-parse rebuilds it. The biggest corpus fight (12.5 min, 138
+  actors) builds in about 2 s and is about 700 KB gzipped; opening it again takes 40 ms. Not
+  part of the analysis: no `ANALYZER_VERSION` bump.
+- **Cleanup keeps the replay cache.** The startup cleanup deleted every unreferenced
+  `.json(.gz)` in `ei/`, which would have wiped the caches each start. A `*.replay.json.gz` now
+  stays while the EI JSON it was made from is used, and goes with it (fight deletion too).
+- **Facing:** EI's orientation is the angle in the replay's pixel space (it matches the
+  direction of movement within 2° on the corpus), drawn for the squad and allies only.
+- **Map images: Elite Insights' own, downloaded on demand.** EI names an image per fight for
+  Eternal Battlegrounds, the Alpine and Desert Borderlands and Edge of the Mists, and its
+  positions are already in that image's pixels, so no coordinate fit is needed. The four images
+  are pinned, checksummed downloads (`tools.MAP_IMAGES`, about 8 MB), fetched from the Replay
+  tab or Settings into the data folder; the page never loads them from the internet, and they
+  are not shipped in the installer (they are derived from ArenaNet's maps). **Seared
+  Borderlands has no image** (most of the corpus): EI frames those fights in a box around the
+  fight itself, whose origin is not in the JSON, so no fixed image could be aligned. It shows a
+  grid in game units with a scale bar.
+- **Videos are linked by time, not to a session.** A video covers every fight its span
+  overlaps, in any session. The page maps fight second `t` to video second with
+  `fight_start + t - video_start - paused_before(t) + offset` (`frontend/src/lib/videoSync.ts`):
+  the fight start is the log's `timeStartStd` (not `instanceTimeStartStd`, the map entry), one
+  offset per video fixes every fight in it, and pauses come from OBS.
+- **A video's start**, best first: the OBS connection; the file name (OBS's default
+  `2026-11-10 18-11-50`, NVIDIA's `2026.11.10 - 18.11.50`, Game Bar's, read as this PC's local
+  time); the file's creation time; else one length before its last write once the page knows
+  the length. Accuracy is about ±1 s (the log start is to the second); **−0.5 s / +0.5 s** and
+  **Sync here** (scrub the video to the moment the replay shows, save) set the offset exactly.
+- **Linking:** the session's **Videos** tab lists files in the recording folders (default: the
+  Videos folder and one level of subfolders) whose time covers the session's fights, plus a
+  file picker (desktop window) and a path field. Only `.mp4 .mkv .mov .webm .m4v` can be linked,
+  and the file route serves a linked file by id only, so the API can't be used to read other
+  files. Drag and drop was left out: the page can't learn a dropped file's path.
+- **Playback:** one clock drives the map and every video; a video is re-seeked only when it
+  drifts more than 0.25 s, and only the main video has sound. A file that doesn't decode (HEVC
+  without its extension, or a container the window can't play) shows a remux hint.
+- **OBS connection** (`obs.py`, optional, off by default). OBS WebSocket v5, built into OBS 28+,
+  at `127.0.0.1` only. Rules:
+  - OBS records while the app records: the app's recording start (by hand or with the game)
+    starts OBS, unless OBS already records (that recording is used); OBS connecting while the
+    app records starts it then. Recording with the game includes loading screens: starting at
+    the first fight log would miss that fight, since a log arrives after the fight.
+  - The app stops only a recording it started; one started in OBS keeps running.
+  - The events have no time stamps: a recording's start is the app's clock when it learns of
+    it minus `GetRecordStatus.outputDuration`. The file name comes with the stop
+    (`outputPath`) or a split (`RecordFileChanged`), else from the record folder by time.
+    A recording joined while paused is marked approximate (its duration leaves the pause out).
+  - Left running after the app closed: the next start shows "OBS is still recording from the
+    last session" with Stop / Keep; the app never stops it on its own.
+  - OBS missing, a wrong password or a refused start only show a status; log recording is never
+    affected. The password stays in `config.yaml`: the settings API returns only whether one is
+    set, and a save without it keeps it.
+- **Validation:** pytest (210, among them replay extraction, cache reuse and rebuild, the
+  cleanup rule, the video API with Range requests, file-name times, coverage with an offset, the
+  password never returned, and the OBS flows against a fake OBS WebSocket server: auth, start /
+  stop with the app, recordings started in OBS left alone, pauses, splits, joining late,
+  leftover keep / stop, failures); frontend tests for the sync math and the clock; the zerg and
+  GvG analysis of all 142 corpus fights is byte-identical before and after. Run in Chrome
+  against a scratch data folder: a timeline click opened the replay 3 s earlier with an MP4 and
+  an MKV (H.264) at the expected frame, playback stayed in sync, nudge and Sync here saved the
+  right offsets, the EBG image lined up with the roads, and Record / Stop drove a fake OBS
+  through the real UI. Not checked: WebView2 itself, a real OBS, HEVC files.
+
+### Review fixes (2026-11-26)
+
+An independent use-case review of plan 17 found four OBS edge cases; all fixed, each with a test
+that fails without the fix:
+
+- **A recording started in OBS after OBS restarted went into the old row.** The app kept the
+  row it was tracking when the connection dropped; with auto-link off, a recording then started
+  by hand in OBS was written into that row, with its old start. The tracked row is now dropped
+  on disconnect (a reconnect while OBS still records finds it again by its start), and a
+  recording that isn't linked isn't tracked.
+- **OBS's spelling of a file path** (forward slashes on Windows) is stored like every other path
+  (absolute, this system's separators), so a split file isn't suggested and linked a second time.
+- **A row whose length is unknown covers no fight.** Rows closed without a file (the app was
+  closed while OBS recorded and the file can't be found) got `end = start`, which still covered
+  the fight running at that moment (a stray camera icon).
+- **The connection thread survives its reader failing** (a settings save closing the socket
+  between two reads could end it until the app restarted). The reader keeps its own socket,
+  the loop reconnects after any error, and requests waiting for an answer fail as soon as the
+  connection closes instead of after their 5 s timeout.
+
+Left as is: `tests/test_api.py::test_status_settings_and_fight` sometimes fails when its
+WebSocket test session closes (`CancelledError`); it fails the same way without plan 17 (once
+in 6 full runs of the previous commit).
+
 ## Open items at the time of writing
 
 - The Trends page has its first slice only (results per session). Not built: problems across
@@ -1129,5 +1230,8 @@ and 360 wide; pytest, ruff, cargo test, clippy for Linux and Windows and the DLL
   commander.
 - My play's cause, distance and CC rules are off by default after a calibration on one
   recording player's three raid days; with more players' logs they may hold.
+- Replay and video (plan 17), to check on Windows: MKV and MP4 playback in the app's WebView2
+  window, a real OBS (28+) session with Record / Stop, and the sync error against a visible
+  event. No map image for Seared Borderlands.
 - The installer and exe are not code-signed (SmartScreen warning). Signing needs a paid
   certificate or signing service.

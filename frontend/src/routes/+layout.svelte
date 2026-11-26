@@ -8,6 +8,7 @@
 	import { live } from '#lib/live.svelte.ts';
 	import RecordButton from '#lib/components/RecordButton.svelte';
 	import ModeToggle from '#lib/components/ModeToggle.svelte';
+	import ObsStatus from '#lib/components/ObsStatus.svelte';
 	import ImportDialog from '#lib/components/ImportDialog.svelte';
 	import Toasts from '#lib/components/Toasts.svelte';
 	import Icon from '#lib/components/Icon.svelte';
@@ -34,6 +35,14 @@
 	}
 
 	onMount(() => live.start());
+
+	async function obsLeftover(action: 'stop' | 'keep') {
+		try {
+			live.obs = await api.obsLeftover(action);
+		} catch (e) {
+			toasts.error(e);
+		}
+	}
 
 	let diagBusy = $state(false);
 	async function copyReport() {
@@ -103,6 +112,7 @@
 	<div class="flex min-w-0 flex-1 flex-col">
 		<header class="flex h-14 shrink-0 items-center gap-3 border-b border-line bg-panel/60 px-6 backdrop-blur">
 			<RecordButton />
+			<ObsStatus />
 			<ModeToggle />
 			{#if importer.phase === 'checking'}
 				<div class="flex items-center gap-2 text-xs text-muted">
@@ -133,6 +143,14 @@
 				</button>
 			</div>
 		</header>
+		{#if live.obs?.leftover}
+			<div class="flex items-center gap-3 border-b border-major/30 bg-major/10 px-6 py-2 text-sm">
+				<Icon name="video" class="size-4 shrink-0 text-major" />
+				<span class="min-w-0 flex-1">OBS is still recording from the last session (the app was closed while it recorded).</span>
+				<button class="btn" onclick={() => obsLeftover('stop')}>Stop OBS recording</button>
+				<button class="btn btn-ghost" onclick={() => obsLeftover('keep')} title="Leave it running; the app won't stop it">Keep recording</button>
+			</div>
+		{/if}
 		{#if live.crashes.length}
 			{@const last = live.crashes[live.crashes.length - 1]}
 			<div class="flex items-center gap-3 border-b border-loss/30 bg-loss/10 px-6 py-2 text-sm">

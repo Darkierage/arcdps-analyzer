@@ -17,6 +17,7 @@
 	import Icon from '#lib/components/Icon.svelte';
 	import FightRecap from '#lib/components/FightRecap.svelte';
 	import { momentWindow } from '#lib/myplay.ts';
+	import ReplayPanel from '#lib/components/ReplayPanel.svelte';
 
 	const id = $derived(Number(page.params.id));
 	let data = $state<FightDetail | null>(null);
@@ -38,7 +39,11 @@
 	let fromSession = $state(false);
 	let pendingFinding: string | null = null;
 	// ?t=<s> (a down linked from My play): highlight that moment on the picked player's chart.
+	// On the Replay tab, ?t= is where the replay stands.
 	let pendingMoment: [number, number] | null = null;
+	// A jump into the replay: fight second, with the lead-in (clicks, links) or exact (?t=).
+	let replayAt = $state<{ t: number; lead: boolean; n: number } | null>(null);
+	let replayN = 0;
 
 	async function load() {
 		try {
@@ -86,10 +91,12 @@
 			pendingFinding = q.get('finding');
 			fromSession = q.get('from') === 'session';
 			party = partyFromUrl(q);
-			pendingMoment = momentWindow(q.get('t'));
 			focusFinding = null;
 			showMore = false;
 			tab = pendingFinding ? 'debrief' : tabs.some((x) => x.id === t) ? t! : 'debrief';
+			const at = Number(q.get('t'));
+			pendingMoment = tab === 'replay' ? null : momentWindow(q.get('t'));
+			replayAt = tab === 'replay' && q.get('t') && Number.isFinite(at) ? { t: at, lead: false, n: ++replayN } : null;
 			focusStat = stat && tab !== 'debrief' ? { tab, column: stat, sort: q.get('sort') === 'asc' ? 'asc' : 'desc' } : null;
 		});
 		load();
@@ -122,7 +129,7 @@
 		}
 		const u = addressUrl();
 		withParty(u);
-		for (const k of ['tab', 'stat', 'sort', 'finding']) u.searchParams.delete(k);
+		for (const k of ['tab', 'stat', 'sort', 'finding', 't']) u.searchParams.delete(k);
 		if (t !== 'debrief') u.searchParams.set('tab', t);
 		if (focus) {
 			u.searchParams.set('stat', focus.column);
@@ -152,6 +159,25 @@
 		window.addEventListener('popstate', follow);
 		return () => window.removeEventListener('popstate', follow);
 	});
+
+	/** Open the Replay tab at fight second `t` (minus the lead-in): a timeline click or ▶ link.
+	 * Its own history entry, so Back returns to where the click came from. */
+	function openReplay(t: number) {
+		replayAt = { t, lead: true, n: ++replayN };
+		if (tab !== 'replay') {
+			setTab('replay', null, true);
+			window.scrollTo({ top: 0 });
+		}
+	}
+
+	/** The replay stopped at a moment: keep it in the address (a reload or a copied link opens
+	 * it there). */
+	function replayMoment(t: number) {
+		if (tab !== 'replay') return;
+		const u = addressUrl();
+		u.searchParams.set('t', t.toFixed(1));
+		replaceState(u, page.state);
+	}
 
 	/** Debrief timeline -> Boons tab, and back to the timeline where the reader was. */
 	let cameFromTimeline = false; // the history entry before this one is the Debrief timeline
@@ -263,6 +289,7 @@
 	const boonGroups = ['Uptime', 'Self generation', 'Group generation', 'Off-group generation', 'Squad generation'];
 	const tabs = [
 		{ id: 'debrief', label: 'Debrief' },
+		{ id: 'replay', label: 'Replay' },
 		{ id: 'overview', label: 'Overview' },
 		{ id: 'boons', label: 'Boons' },
 		{ id: 'offense', label: 'Offense' },
@@ -532,7 +559,7 @@
 					</div>
 					{#if playerAcc}
 						{#if playerSeries}
-							<PlayerTimelineChart series={playerSeries} timeline={stats.timeline} {highlight} />
+							<PlayerTimelineChart series={playerSeries} timeline={stats.timeline} {highlight} onseek={openReplay} />
 							<p class="mt-1 text-xs text-faint">
 								{pickedPlayer?.name}: health, boons and conditions; damage dealt and taken and healing + barrier per second;
 								distance to the tag and to the squad's center. Orange shading: downed; red: dead.
@@ -543,8 +570,8 @@
 							<div class="h-[460px] animate-pulse rounded bg-panel-2/40"></div>
 						{/if}
 					{:else}
-						<FightTimeline timeline={stats.timeline} {highlight} party={debriefParty} {professions} />
-						<p class="mt-1 text-xs text-faint">Hover a ▲ down or ✕ death marker to see who.</p>
+						<FightTimeline timeline={stats.timeline} {highlight} party={debriefParty} {professions} onseek={openReplay} />
+						<p class="mt-1 text-xs text-faint">Hover a ▲ down or ✕ death marker to see who. Click the chart to watch that moment in the replay.</p>
 					{/if}
 				</div>
 
@@ -561,6 +588,7 @@
 								active={focusFinding === fnd.key || (highlight != null && fnd.window != null && highlight[0] === fnd.window[0] && highlight[1] === fnd.window[1])}
 								onfocus={(w) => ((highlight = w), (focusFinding = null))}
 								onstats={(f) => setTab(f.tab, f)}
+								onreplay={openReplay}
 							/>
 						{/each}
 						{#if notes.more.length}
@@ -570,7 +598,7 @@
 							{#if showMore}
 								{#each notes.more as fnd}
 									<FindingCard finding={fnd} active={focusFinding === fnd.key} onfocus={(w) => ((highlight = w), (focusFinding = null))}
-										onstats={(f) => setTab(f.tab, f)} />
+										onstats={(f) => setTab(f.tab, f)} onreplay={openReplay} />
 								{/each}
 							{/if}
 						{/if}
@@ -627,6 +655,8 @@
 						</div>
 					</div>
 				</div>
+			{:else if tab === 'replay'}
+				<ReplayPanel fightId={id} timeline={stats.timeline} {professions} parties={partyIds} at={replayAt} onmoment={replayMoment} />
 			{:else if tab === 'you'}
 				<div class="mb-4 flex items-center gap-3">
 					<label class="flex items-center gap-2 text-sm text-muted">
@@ -641,7 +671,7 @@
 				{#if youError}
 					<div class="card p-5 text-sm text-muted">{youError}</div>
 				{:else if youReview?.fight}
-					<FightRecap review={youReview} onpick={showDown} />
+					<FightRecap review={youReview} onpick={showDown} onreplay={(d) => openReplay(d.t)} />
 				{:else if youReview || !youAccount}
 					<div class="card p-5 text-sm text-muted">No squad member who was in this fight to show.</div>
 				{:else}
@@ -750,6 +780,7 @@
 									<th class="px-3 py-2 text-right font-medium">Boons</th>
 									<th class="px-3 py-2 text-right font-medium">Conditions</th>
 									<th class="px-3 py-2 font-medium">Outcome</th>
+									<th class="px-3 py-2"></th>
 								</tr>
 							</thead>
 							<tbody>
@@ -766,6 +797,11 @@
 										<td class="tabular px-3 py-1.5 text-right text-muted">{d.boons}</td>
 										<td class="tabular px-3 py-1.5 text-right {d.conditions >= 5 ? 'text-major' : 'text-muted'}">{d.conditions}</td>
 										<td class="px-3 py-1.5">{#if d.died}<span class="text-loss">Died</span>{:else}<span class="text-win">Rallied / ressed</span>{/if}</td>
+										<td class="px-3 py-1.5 text-right">
+											<button class="inline-flex items-center gap-1 text-xs text-accent hover:underline" title="Watch this down in the replay" onclick={() => openReplay(d.t)}>
+												<Icon name="play" class="size-3" /> Replay
+											</button>
+										</td>
 									</tr>
 								{/each}
 							</tbody>

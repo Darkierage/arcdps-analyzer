@@ -192,6 +192,29 @@ Personal hints are built only from your logs, with no outside data (no builds, n
   every player in a folder of EI JSON and prints how often each fires, how often a player's job
   changes between fights on one spec, and the recording player's profile.
 
+## Replay and videos
+
+- **Replay tab** (fight page): every player on the map at the replay's time, with downs and
+  deaths, facing, the commander's tag, a party highlight and "follow tag". Wheel to zoom, drag to
+  pan. Eternal Battlegrounds, the Alpine and Desert Borderlands and Edge of the Mists use Elite
+  Insights' map images (a one-time download of about 8 MB, from the Replay tab or Settings);
+  other maps show a grid in game units.
+- **Jump to a moment:** click the Debrief's fight timeline, or a **▶ Replay** link on a finding
+  or a down. The replay opens 3 s earlier (Settings > Replay and videos). The address keeps the
+  moment (`?tab=replay&t=83`).
+- **Videos:** link recordings on a session's **Videos** tab: recordings in your Videos folder
+  whose time covers the session are suggested, or pick a file. Files stay where they are. Each
+  video plays on every fight it covers, in sync with the replay; several videos show side by
+  side (click a small one to make it the main one). The start time comes from the file name
+  (OBS, NVIDIA and Game Bar names) or the file's creation time, about ±1 s; fix it once per
+  video with **−0.5s / +0.5s** or **Sync here** (scrub the video to the moment the replay shows,
+  then save). HEVC recordings may not play: remux to MP4 in OBS or record with H.264 / AV1.
+- **OBS connection (optional):** in OBS, Tools > WebSocket Server Settings > Enable, then copy
+  the port and password into Settings > Replay and videos. The app's Record button (and
+  auto-record with the game) then starts and stops OBS recording, and each recording links
+  itself to its fights. The app only stops recordings it started, and only talks to OBS on this
+  PC.
+
 ## LLM debrief tuning
 
 `scripts/llm_bench.py` compares prompt variants (`backend/wvw_analyzer/llm/prompts.py`) for the local
@@ -311,6 +334,8 @@ The version comes from `backend/wvw_analyzer/__init__.py`.
 - `backend/wvw_analyzer/llm`: llama-server lifecycle and debrief prompt
 - `backend/wvw_analyzer/api`: FastAPI REST and WebSocket; serves the built UI
 - `backend/wvw_analyzer/addon_install.py`: install, update and remove the in-game overlay
+- `backend/wvw_analyzer/replay.py`, `videos.py`, `obs.py`: replay data, linked videos, the
+  optional OBS connection
 - `addon/`: the in-game overlay, a Rust Nexus addon (nexus-rs); `src/view` draws it,
   `examples/preview` renders it to images
 - `frontend/`: SvelteKit + Tailwind + ECharts

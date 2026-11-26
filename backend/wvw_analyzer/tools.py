@@ -1,4 +1,5 @@
-"""Download pinned external tools: Elite Insights CLI, .NET runtime, llama-server, LLM model.
+"""Download pinned external tools: Elite Insights CLI, .NET runtime, llama-server, LLM model,
+replay map images.
 
 Every download is pinned to a version and verified against a checksum. .NET and the models use
 the publisher's own checksums (Microsoft's releases.json, Hugging Face LFS metadata); Elite
@@ -58,6 +59,20 @@ MODELS = {
 MODEL_SHA256 = {
     "Qwen3-4B-Q4_K_M.gguf": "7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5",
     "Qwen3-1.7B-Q8_0.gguf": "061b54daade076b5d3362dac252678d17da8c68f07560be70818cace6590cb1a",
+}
+
+# Combat replay map images: the ones Elite Insights uses for its own replay (its JSON names the
+# URL per fight, and positions are already in that image's pixel space). Downloaded on demand,
+# not shipped: they are derived from ArenaNet's maps. Hashes recorded when they were pinned.
+MAP_IMAGES = {
+    "ebg": ("https://i.imgur.com/t0khtQd.png",
+            "7199f287973afcb08dd93094e914ad76aab6ec44dd0ee30b45d1185c17516119"),
+    "alpine": ("https://i.imgur.com/nVu2ivF.png",
+               "70e599be70994818fd7e0a80397d75398dece5929095edd2aec695b94db79a62"),
+    "desert": ("https://i.imgur.com/R5p9fqw.png",
+               "cb97d610ff5a881509c09c672cc7d61c850ed8c682be5280b58de4c538d612d1"),
+    "eotm": ("https://i.imgur.com/iEpKYL0.jpg",
+             "08b34f14fb65bdd1114576b5014693b5a491f31e730faf59ecbdb69a0fac4667"),
 }
 
 Progress = Callable[[int, int], None]  # (downloaded bytes, total bytes)
@@ -226,3 +241,39 @@ def download_model(name: str, progress: Progress | None = None) -> Path:
     log.info("downloading model %s", name)
     _download(MODELS[name], dest, progress, sha256=MODEL_SHA256.get(name))
     return dest
+
+
+# ---- combat replay map images -----------------------------------------------------------------
+def maps_dir() -> Path:
+    return paths.data_dir() / "maps"
+
+
+def map_key_for_url(url: str | None) -> str | None:
+    """The pinned map image Elite Insights' JSON points at, if it is one of ours."""
+    return next((k for k, (u, _) in MAP_IMAGES.items() if u == url), None)
+
+
+def map_image_path(key: str, root: Path | None = None) -> Path | None:
+    """The downloaded image for a map key, or None if it isn't downloaded (or unknown)."""
+    if key not in MAP_IMAGES:
+        return None
+    url = MAP_IMAGES[key][0]
+    p = (root or maps_dir()) / f"{key}{Path(url).suffix}"
+    return p if p.is_file() else None
+
+
+def map_images_installed(root: Path | None = None) -> bool:
+    return all(map_image_path(k, root) for k in MAP_IMAGES)
+
+
+def download_map_images(root: Path | None = None) -> list[str]:
+    """Fetch the replay map images that are missing; returns the keys downloaded."""
+    d = root or maps_dir()
+    got = []
+    for key, (url, sha) in MAP_IMAGES.items():
+        if map_image_path(key, d):
+            continue
+        log.info("downloading replay map %s", url)
+        _download(url, d / f"{key}{Path(url).suffix}", sha256=sha)
+        got.append(key)
+    return got

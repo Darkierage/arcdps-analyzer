@@ -68,6 +68,23 @@ class LlmSettings(BaseModel):
     quiet_minutes: float = Field(5, ge=0.5)
 
 
+class VideoSettings(BaseModel):
+    # Folders searched for recordings to suggest on a session's Videos tab; empty: the user's
+    # Videos folder (and its subfolders one level down).
+    folders: list[str] = Field(default_factory=list)
+    lead_in_s: float = Field(3, ge=0, le=30)  # a jump into the replay starts this much earlier
+
+
+class ObsSettings(BaseModel):
+    """Optional OBS connection (OBS WebSocket, built into OBS 28+). Always 127.0.0.1."""
+
+    enabled: bool = False
+    port: int = Field(4455, ge=1, le=65535)
+    password: str = ""  # never returned by the API (see api/app.py)
+    control_recording: bool = True  # start/stop OBS recording with the app's recording
+    auto_link: bool = True  # link OBS recordings to the fights they cover
+
+
 class Settings(BaseModel):
     onboarded: bool = False  # first-run setup screen completed
     log_dir: str | None = None
@@ -86,6 +103,8 @@ class Settings(BaseModel):
     detectors: dict[str, dict[str, Any]] = Field(default_factory=dict)
     # The account "My play" opens on; None: the account that recorded the most fights.
     my_account: str | None = None
+    videos: VideoSettings = Field(default_factory=VideoSettings)
+    obs: ObsSettings = Field(default_factory=ObsSettings)
 
     @field_validator("host")
     @classmethod

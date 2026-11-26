@@ -26,7 +26,10 @@ from ..metrics.aggregate import aggregate_session, session_trend
 from ..notes import templates
 from ..state import AppState
 from ..store.files import remove_fight_files
+from . import obs as obs_routes
 from . import overlay
+from . import replay as replay_routes
+from . import videos as video_routes
 from .debrief import split_debrief
 
 log = logging.getLogger(__name__)
@@ -122,6 +125,9 @@ def create_app(state: AppState) -> FastAPI:
         return await call_next(request)
 
     app.include_router(overlay.router(state))
+    app.include_router(replay_routes.router(state))
+    app.include_router(video_routes.router(state))
+    app.include_router(obs_routes.router(state))
 
     # ---- status -----------------------------------------------------------------------
     @app.get("/api/status")
@@ -138,6 +144,7 @@ def create_app(state: AppState) -> FastAPI:
             "eiInstalled": ei.exists(),
             "eiPath": str(ei),
             "llm": state.llm.status(),
+            "obs": state.obs.status(),
             "dataDir": str(state.data_dir),
             "crashes": diagnostics.pending_crashes(state.data_dir),
         }
@@ -227,7 +234,8 @@ def create_app(state: AppState) -> FastAPI:
         if not s:
             raise HTTPException(404, "Session not found")
         agg = aggregate_session(state.db.session_analyses(session_id))
-        fights = state.db.fights(session_id=session_id)
+        fights = video_routes.mark_videos(state.db.fights(session_id=session_id),
+                                          state.db.videos())
         return {"session": s, "aggregate": agg, "fights": fights,
                 "recording": state.recorder.session_id == session_id}
 
@@ -290,8 +298,9 @@ def create_app(state: AppState) -> FastAPI:
     @app.get("/api/fights")
     def fights(session_id: int | None = None, include_skipped: bool = False,
                limit: int = 300) -> list[dict[str, Any]]:
-        return state.db.fights(session_id=session_id, include_skipped=include_skipped,
-                               limit=limit)
+        return video_routes.mark_videos(
+            state.db.fights(session_id=session_id, include_skipped=include_skipped, limit=limit),
+            state.db.videos())
 
     @app.get("/api/fights/{fight_id}")
     def fight(fight_id: int) -> dict[str, Any]:
@@ -365,8 +374,12 @@ def create_app(state: AppState) -> FastAPI:
     @app.get("/api/settings")
     def get_settings() -> dict[str, Any]:
         s = state.config.settings
+        dumped = s.model_dump(mode="json")
+        # The OBS password stays in config.yaml: the page only learns whether one is set, and
+        # a save without one keeps it (see put_settings).
+        dumped["obs"]["password_set"] = bool(dumped["obs"].pop("password", ""))
         return {
-            "settings": s.model_dump(mode="json"),
+            "settings": dumped,
             "detectors": registry.describe(s.detectors),
             "personalRules": coach_registry.describe(s.detectors),
             "resolvedLogDir": str(s.resolved_log_dir() or ""),
@@ -382,12 +395,21 @@ def create_app(state: AppState) -> FastAPI:
         for key in ("host", "port"):
             if key in patch and patch[key] != getattr(state.config.settings, key):
                 raise HTTPException(400, f"{key} can only be changed in config.yaml")
+        if isinstance(patch.get("obs"), dict):
+            obs = dict(patch["obs"])
+            obs.pop("password_set", None)
+            if obs.get("password") is None:  # not sent: keep the stored one
+                obs.pop("password", None)
+            patch = {**patch, "obs": obs}
         try:
             if "detectors" in patch:
                 patch = {**patch, "detectors": registry.check_overrides(patch["detectors"])}
+            old_obs = state.config.settings.obs
             state.config.update(patch)
         except Exception as e:
             raise HTTPException(400, f"Invalid settings: {e}") from e
+        if state.config.settings.obs != old_obs:
+            state.obs.settings_changed()
         templates.reload()
         return get_settings()
 
