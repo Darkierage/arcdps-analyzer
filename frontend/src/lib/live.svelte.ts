@@ -1,5 +1,5 @@
 // Live app state fed by the backend WebSocket (recording, queue, fight updates).
-import { api, type CrashRecord, type FightMode, type FightRow, type LlmStatus, type ObsStatus, type QueueState, type RecordingState } from './api.ts';
+import { api, type CrashRecord, type FightMode, type FightRow, type LlmStatus, type ObsStatus, type QueueState, type RecordingState, type UpdateStatus } from './api.ts';
 
 type Listener = (event: any) => void;
 
@@ -15,6 +15,7 @@ class Live {
 	crashes = $state<CrashRecord[]>([]); // crashes / unexpected exits not dismissed yet
 	dataDir = $state('');
 	obs = $state<ObsStatus | null>(null);
+	update = $state<UpdateStatus | null>(null); // in-app updater (banner, Settings)
 	private listeners = new Set<Listener>();
 	private ws: WebSocket | null = null;
 	private retry = 0;
@@ -40,9 +41,25 @@ class Live {
 			this.crashes = s.crashes ?? [];
 			this.dataDir = s.dataDir;
 			this.obs = s.obs ?? null;
+			this.update = await api.update();
 		} catch {
 			/* backend not up yet; the socket retry loop will refresh */
 		}
+	}
+
+	private updateTimer: ReturnType<typeof setTimeout> | null = null;
+	/** Re-read the update status shortly after recording or the queue changed (debounced: an
+	 * import sends many queue events). Only while an update is on offer. */
+	private refreshUpdateSoon() {
+		if (!this.update?.available || this.updateTimer) return;
+		this.updateTimer = setTimeout(async () => {
+			this.updateTimer = null;
+			try {
+				this.update = await api.update();
+			} catch {
+				/* the next event or reconnect tries again */
+			}
+		}, 1000);
 	}
 
 	/** Subscribe to raw events; returns an unsubscribe function. */
@@ -72,8 +89,11 @@ class Live {
 				this.queue = e.queue;
 			} else if (e.type === 'recording') this.recording = e.recording;
 			else if (e.type === 'queue') this.queue = e.queue;
+			// Whether an update can be installed depends on recording and the queue.
+			if (e.type === 'recording' || e.type === 'queue') this.refreshUpdateSoon();
 			else if (e.type === 'llm') this.llm = e.llm;
 			else if (e.type === 'obs') this.obs = e.obs;
+			else if (e.type === 'update') this.update = e.update;
 			for (const fn of this.listeners) fn(e);
 		};
 		ws.onclose = () => {

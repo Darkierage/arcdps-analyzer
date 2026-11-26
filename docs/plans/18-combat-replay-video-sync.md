@@ -1,6 +1,7 @@
 # WvW Analyzer: combat replay, timeline jumps and synced video plan
 
-> **Status:** draft (2026-11-26), reviewed once and the review's fixes applied: replay cache
+> **Status:** written as plan 17, renumbered 18 on merging (17 went to the in-app updater).
+> Draft (2026-11-26), reviewed once and the review's fixes applied: replay cache
 > kept by the startup cleanup, precise sync dropped (DECISIONS: no `.zevtc` parsing), OBS
 > edge cases, map images as an on-demand download, one-decimal positions. Approved and
 > implemented 2026-11-26 (see `DECISIONS.md`, "Combat replay and synced video"). Deviations:

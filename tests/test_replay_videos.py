@@ -1,4 +1,4 @@
-"""Combat replay, its cache and cleanup, linked videos and their API (plan 17)."""
+"""Combat replay, its cache and cleanup, linked videos and their API (plan 18)."""
 
 from __future__ import annotations
 

@@ -66,6 +66,10 @@ cd addon && cargo test && cargo clippy    # addon tests (run on Linux); also car
   - `api/overlay.py` + `addon_install.py`: the overlay payload and installing the addon.
   - `replay.py`, `videos.py`, `obs.py` (+ `api/replay.py`, `api/videos.py`, `api/obs.py`): the
     combat replay cache, linked videos and the optional OBS connection (127.0.0.1 only).
+  - `updater.py`: the in-app updater (GitHub release check, Ed25519-signed `latest.json`,
+    download on click, installer started after a clean shutdown). Releases are signed with
+    `scripts/release_sign.py`; never weaken its checks (they are the only gate before an
+    unsigned installer runs).
   - `addon/`: the Nexus addon. It only renders the strings `/api/overlay` sends; the payload
     shape is pinned by `addon/tests/fixtures/overlay.json` (regenerate with
     `UPDATE_FIXTURES=1 uv run pytest tests/test_overlay_api.py`).

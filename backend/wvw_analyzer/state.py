@@ -17,6 +17,7 @@ from .llm.manager import LlmService
 from .obs import ObsService
 from .store.db import Database
 from .store.files import cleanup_orphans
+from .updater import Updater
 
 log = logging.getLogger(__name__)
 
@@ -34,6 +35,23 @@ class AppState:
         self.recorder.on_change.append(self.obs.on_recording)
         self._stop = threading.Event()
         self._started_at = time.time()
+        # Set when the app should close itself (an update is ready to install); main.py
+        # closes the window or stops the server.
+        self.exit_requested = threading.Event()
+        self.updater = Updater(self.data_dir,
+                               enabled=lambda: self.config.settings.check_updates,
+                               skipped=lambda: self.config.settings.skipped_update,
+                               busy=self.install_blocker, publish=self.bus.publish,
+                               request_exit=self.exit_requested.set)
+
+    def install_blocker(self) -> str | None:
+        """Why an update can't be installed right now (the installer closes the app)."""
+        if self.recorder.recording:
+            return "Stop recording first"
+        q = self.processor.state()
+        if q["pending"] or q["current"]:
+            return "Wait until the queued logs are analyzed"
+        return None
 
     def start(self) -> None:
         self._started_at = time.time()
@@ -52,9 +70,11 @@ class AppState:
         threading.Thread(target=addon_install.auto_update, args=(self.config.settings.gw2_dir,),
                          name="addon-update", daemon=True).start()
         threading.Thread(target=self._auto_debrief_loop, name="auto-debrief", daemon=True).start()
+        self.updater.start()
 
     def stop(self) -> None:
         self._stop.set()
+        self.updater.stop()
         if self.recorder.recording:
             self.recorder.stop(wait=True)
         self.obs.stop()  # after the recorder: an OBS recording the app started is stopped first

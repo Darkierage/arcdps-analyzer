@@ -6,6 +6,8 @@ import { compare, fightLink, fmtNumber, momentWindow, myPlaySearch, parseScope, 
 import { trendTooltipHtml } from '#lib/trendTooltip.ts';
 import { rememberSession, sessionBackHref } from '#lib/sessionNav.ts';
 import { findSeriesRow, seriesKey } from '#lib/players.ts';
+import { bannerKind, downloadProgress, unfinishedKey } from '#lib/update.ts';
+import type { UpdateStatus } from '#lib/api.ts';
 
 const EVIL = '<img src=x onerror=alert(1)>';
 
@@ -151,4 +153,37 @@ test('personal numbers are formatted by unit and judged by direction', () => {
 	assert.equal(compare(10, 8, false), 'worse');
 	assert.equal(compare(10, 9.5, true), null);
 	assert.equal(compare(10, 8, null), null);
+});
+
+test('the update banner shows a newer release until it is skipped or hidden', () => {
+	const latest = { version: '0.8.0', notes: '', url: '', publishedAt: null, verified: true, verifyError: null, size: 1 };
+	const u: UpdateStatus = {
+		current: '0.7.0', enabled: true, checking: false, lastCheck: 1, error: null, latest, available: true,
+		skipped: false, canInstall: true, blockedReason: null, download: null, unfinished: null, releasesUrl: ''
+	};
+	assert.equal(bannerKind(null, null), 'none');
+	assert.equal(bannerKind(u, null), 'available');
+	assert.equal(bannerKind({ ...u, available: false }, null), 'none');
+	assert.equal(bannerKind({ ...u, skipped: true }, null), 'none');
+	assert.equal(bannerKind(u, '0.8.0'), 'none'); // "Later" for this version
+	assert.equal(bannerKind(u, '0.7.5'), 'available'); // a newer one than the hidden one
+	const downloading = { ...u, skipped: true, download: { state: 'downloading' as const, done: 1, total: 2, error: null } };
+	assert.equal(bannerKind(downloading, '0.8.0'), 'available'); // a running install stays visible
+	// A failed download is hidden by Later and Skip like any offer (review U1).
+	const failed = { ...u, download: { state: 'failed' as const, done: 1, total: 2, error: 'x' } };
+	assert.equal(bannerKind(failed, null), 'available');
+	assert.equal(bannerKind(failed, '0.8.0'), 'none');
+	assert.equal(bannerKind({ ...failed, skipped: true }, null), 'none');
+	// An unfinished update: its banner, which Later hides; a newer release replaces it (review U6).
+	const unfinished = { ...u, unfinished: { version: '0.8.0', canRetry: true } };
+	assert.equal(bannerKind(unfinished, '0.8.0'), 'unfinished');
+	assert.equal(bannerKind(unfinished, unfinishedKey('0.8.0')), 'none');
+	const newer = { ...unfinished, latest: { ...latest, version: '0.8.1' } };
+	assert.equal(bannerKind(newer, null), 'available');
+	assert.equal(bannerKind({ ...newer, skipped: true }, null), 'unfinished');
+	// Checks turned off: no offer from the saved check (review U3); an unfinished update still shows.
+	assert.equal(bannerKind({ ...u, enabled: false }, null), 'none');
+	assert.equal(bannerKind({ ...newer, enabled: false }, null), 'unfinished');
+	assert.equal(downloadProgress({ done: 5 * 1024 * 1024, total: 56 * 1024 * 1024 }), '5.0 / 56 MB');
+	assert.equal(downloadProgress({ done: 12 * 1024 * 1024, total: 0 }), '12 MB');
 });

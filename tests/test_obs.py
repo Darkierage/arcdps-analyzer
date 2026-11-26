@@ -1,4 +1,4 @@
-"""The optional OBS connection, against a fake OBS WebSocket v5 server (plan 17, phase 4)."""
+"""The optional OBS connection, against a fake OBS WebSocket v5 server (plan 18, phase 4)."""
 
 from __future__ import annotations
 

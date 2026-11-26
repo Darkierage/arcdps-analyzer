@@ -64,6 +64,10 @@ Filename: "{tmp}\MicrosoftEdgeWebview2Setup.exe"; Parameters: "/silent /install"
   StatusMsg: "Installing Microsoft Edge WebView2 (needed for the app window)..."; Check: NeedsWebView2
 Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; \
   Flags: nowait postinstall skipifsilent
+; The app's own updater runs this setup silently with /RELAUNCH=1 and closes itself; start it
+; again afterwards. {param:} only sees the /Name=Value form. runasoriginaluser: after an
+; all-users (elevated) install the app must not restart as the admin account.
+Filename: "{app}\{#AppExe}"; Flags: nowait runasoriginaluser; Check: ShouldRelaunch
 
 [Code]
 const
@@ -81,6 +85,12 @@ end;
 function NeedsWebView2: Boolean;
 begin
   Result := not (HasWebView2Version(HKLM, WebView2Key) or HasWebView2Version(HKCU, WebView2KeyUser));
+end;
+
+{ Set by the in-app updater (plan 17): restart the app after a silent update. }
+function ShouldRelaunch: Boolean;
+begin
+  Result := ExpandConstant('{param:RELAUNCH|0}') = '1';
 end;
 
 { Stop processes that would block replacing or removing files: anything running from the

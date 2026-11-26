@@ -14,6 +14,7 @@
 	import Icon from '#lib/components/Icon.svelte';
 	import GlobalDrop from '#lib/components/GlobalDrop.svelte';
 	import ImportConfirm from '#lib/components/ImportConfirm.svelte';
+	import UpdateBanner from '#lib/components/UpdateBanner.svelte';
 	import { importer } from '#lib/importer.svelte.ts';
 	import { api } from '#lib/api.ts';
 	import { toasts } from '#lib/live.svelte.ts';
@@ -166,6 +167,7 @@
 				</button>
 			</div>
 		{/if}
+		<UpdateBanner />
 		<main class="min-h-0 flex-1 overflow-y-auto">
 			{@render children()}
 		</main>

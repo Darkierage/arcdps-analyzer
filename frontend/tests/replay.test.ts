@@ -1,4 +1,4 @@
-// Replay and video sync helpers (plan 17).
+// Replay and video sync helpers (plan 18).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { ReplayActor } from '#lib/api.ts';

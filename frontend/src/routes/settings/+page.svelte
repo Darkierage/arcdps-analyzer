@@ -105,6 +105,7 @@
 			else if (obsClear) patch.obs.password = '';
 			// Only send the mode if it was changed here, so a later header toggle isn't undone.
 			if (s.fight_mode === loadedMode) delete patch.fight_mode;
+			delete patch.skipped_update; // set by the update banner, which may have changed it meanwhile
 			data = await api.saveSettings(patch);
 			// detectors is replaced as a whole (not merged) so removed overrides are dropped
 			s = $state.snapshot(data.settings);
@@ -166,6 +167,26 @@
 	}
 
 	const llm = $derived(live.llm);
+
+	// Updates (plan 17): the switch is a normal setting; "Check now" asks right away.
+	const upd = $derived(live.update);
+	let checking = $state(false);
+	async function checkNow() {
+		checking = true;
+		try {
+			live.update = await api.checkUpdate();
+			const u = live.update;
+			if (u.error) toasts.push(u.error, 'error');
+			else if (!u.available) toasts.push(`You have the latest version (${u.current})`, 'success');
+		} catch (e) {
+			toasts.error(e);
+		} finally {
+			checking = false;
+		}
+	}
+	function fmtWhen(epoch: number | null): string {
+		return epoch ? new Date(epoch * 1000).toLocaleString() : 'never';
+	}
 
 	let diagBusy = $state(false);
 	async function copyReport() {
@@ -530,12 +551,48 @@
 			</div>
 		</section>
 
+		<section class="card mb-5 p-5" id="updates">
+			<h2 class="mb-1 flex items-center gap-2 font-semibold"><Icon name="download" class="size-4 text-accent" />Updates</h2>
+			<p class="mb-4 text-sm text-muted">
+				The app asks GitHub for the latest release when it starts and once a day. That request carries no account,
+				folder or fight data. Updates are downloaded only when you click <b>Install and restart</b>, and only a release
+				signed by the app's author is installed.
+			</p>
+			<label class="flex items-center gap-2 text-sm">
+				<input type="checkbox" class="accent-accent" bind:checked={s.check_updates} /> Check for updates
+			</label>
+			<div class="mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-line bg-panel-2 p-3 text-sm">
+				<span>Version {upd?.current ?? live.version}</span>
+				{#if upd?.available && upd.latest}
+					<span class="chip bg-accent/15 text-accent">{upd.latest.version} available</span>
+				{/if}
+				<span class="text-xs text-faint">Last check: {fmtWhen(upd?.lastCheck ?? null)}</span>
+				{#if upd?.error}<span class="text-xs text-loss">{upd.error}</span>{/if}
+				<div class="ml-auto flex gap-2">
+					<a class="btn" href={upd?.releasesUrl ?? '#'} target="_blank" rel="noreferrer">Release page</a>
+					<button class="btn btn-primary" disabled={checking || upd?.checking} onclick={checkNow}>
+						<Icon name="refresh" class="size-4" /> Check now
+					</button>
+				</div>
+			</div>
+			{#if upd?.skipped && upd.latest}
+				<p class="mt-2 text-xs text-faint">
+					Version {upd.latest.version} is skipped.
+					<button class="text-accent hover:underline" onclick={async () => {
+						await api.saveSettings({ skipped_update: null });
+						live.update = await api.update();
+					}}>Show it again</button>
+				</p>
+			{/if}
+		</section>
+
 		<section class="card mb-10 p-5" id="troubleshooting">
 			<h2 class="mb-1 flex items-center gap-2 font-semibold"><Icon name="wrench" class="size-4 text-accent" />Troubleshooting</h2>
 			<p class="mb-4 text-sm text-muted">
 				If something doesn't work, copy the diagnostics and send them to whoever helps you with the app (a Discord
 				message is fine). They hold the app version, the setup checks, recent errors and crashes, and the end of the
-				app log. Your Windows user name and account names are removed. Nothing is sent anywhere automatically.
+				app log. Your Windows user name and account names are removed. The diagnostics are never sent anywhere
+				automatically.
 			</p>
 			<div class="flex flex-wrap items-center gap-3 rounded-lg border border-line bg-panel-2 p-3 text-sm">
 				<span class="min-w-0 flex-1 truncate text-xs text-faint" title={live.dataDir}>App folder: {live.dataDir}</span>

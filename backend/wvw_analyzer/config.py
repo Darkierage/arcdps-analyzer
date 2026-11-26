@@ -105,6 +105,9 @@ class Settings(BaseModel):
     my_account: str | None = None
     videos: VideoSettings = Field(default_factory=VideoSettings)
     obs: ObsSettings = Field(default_factory=ObsSettings)
+    # Ask GitHub for a newer release at start and once a day (plan 17).
+    check_updates: bool = True
+    skipped_update: str | None = None  # "Skip this version": no banner for this version
 
     @field_validator("host")
     @classmethod
