@@ -6,6 +6,7 @@ import re
 from collections import Counter, defaultdict
 from typing import Any
 
+from ..detectors.base import SEVERITY_ORDER
 from .columns import ALL_COLUMNS
 from .table import squad_row
 
@@ -235,6 +236,11 @@ def aggregate_session(items: list[dict[str, Any]], detail: bool = True) -> dict[
                 e = target.setdefault(key, {"key": key, "title": _strip_title(f["title"]),
                                             "count": 0, "fights": [], "losses": 0,
                                             "severity": f["severity"], "occurrences": []})
+                # The worst severity it had in any fight: the ranking below and the overlay's
+                # chip use the same one.
+                if (SEVERITY_ORDER.get(f["severity"], 9)
+                        < SEVERITY_ORDER.get(e["severity"], 9)):
+                    e["severity"] = f["severity"]
                 if it["id"] not in e["fights"]:
                     e["count"] += 1
                     e["fights"].append(it["id"])

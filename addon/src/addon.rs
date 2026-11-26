@@ -11,6 +11,7 @@ use nexus::{
     gui::{RenderType, register_render, render},
     imgui::{Ui, sys},
     keybind::{keybind_handler, register_keybind_with_string},
+    localization::set_translation,
     paths::get_addon_dir,
     quick_access::add_quick_access,
     texture::load_texture_from_memory,
@@ -30,6 +31,10 @@ nexus::export! {
 
 const KEYBIND: &str = "KB_WVW_ANALYZER_TOGGLE";
 const QUICK_ACCESS: &str = "QA_WVW_ANALYZER";
+/// The keybind's name in Nexus's keybind list (it shows the identifier without one). English in
+/// every language Nexus ships, like the rest of the overlay.
+const KEYBIND_NAME: &str = "Toggle WvW Analyzer window";
+const NEXUS_LANGUAGES: [&str; 10] = ["br", "cn", "cz", "de", "en", "es", "fr", "it", "pl", "ru"];
 // Nexus keeps textures by name for the whole game session: rename it when the image changes,
 // or a hot-reloaded addon keeps showing the old one. Nexus dims it unless hovered.
 const ICON: &str = "TEX_WVW_ANALYZER_QA2";
@@ -168,6 +173,9 @@ fn load() {
     )
     .revert_on_unload();
 
+    for lang in NEXUS_LANGUAGES {
+        set_translation(KEYBIND, lang, KEYBIND_NAME);
+    }
     register_keybind_with_string(
         KEYBIND,
         keybind_handler!(|_id, is_release| {

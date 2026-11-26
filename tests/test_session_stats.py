@@ -337,3 +337,30 @@ def test_session_aggregate_does_not_depend_on_the_hash_seed():
         for seed in ("1", "2", "3")
     }
     assert len(runs) == 1 and json.loads(runs.pop()) == [f"P{i}.{i}" for i in range(12)]
+
+
+def test_recurring_problems_rank_and_show_their_worst_severity():
+    # "Rezzes" was minor in its first fight and major after; three losses. "Outnumbered" (major)
+    # was in two losses and two wins. Ranked by its first severity (minor: 3*2 + 3*0.3 = 6.9)
+    # the rezzes would sink below it (2*2 + 4 = 8); by its worst (3*2 + 3 = 9) it leads.
+    def note(key: str, severity: str) -> dict:
+        return {"detector": key, "key": key, "title": key.title(), "severity": severity,
+                "impact": 1.0, "short": ""}
+
+    def fought(fid: int, result: str, *notes: dict) -> dict:
+        f = _fight(fid, 60, [])
+        f["summary"]["result"] = result
+        f["notes"] = {"issues": list(notes)}
+        return f
+
+    rez_minor, rez_major, out = note("rezzes", "minor"), note("rezzes", "major"), note(
+        "outnumbered", "major")
+    agg = aggregate_session([
+        fought(1, "loss", rez_minor, out),
+        fought(2, "loss", rez_major, out),
+        fought(3, "loss", rez_major),
+        fought(4, "win", out),
+        fought(5, "win", out),
+    ], detail=False)
+    ranked = [(p["key"], p["severity"]) for p in agg["recurringIssues"]]
+    assert ranked == [("rezzes", "major"), ("outnumbered", "major")]

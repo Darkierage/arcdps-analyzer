@@ -8,8 +8,10 @@ use super::{Action, Frame, ViewState};
 use crate::model::{Fight, Note};
 use imgui::{ChildWindow, Ui};
 
-/// Older and newer arrows around "Fight n of N", then **Latest** when the fight on screen isn't
-/// the current session's newest one. Right-aligned to `right`.
+/// Older and newer arrows around "Fight n of N", then **Latest**, right-aligned to `right`.
+/// Every slot is always there: a button that does nothing for this fight (no older or newer one,
+/// or the newest already on screen) is drawn dimmed, and the label's slot fits the widest number
+/// of the session, so paging with the arrows never moves them under the pointer.
 #[allow(clippy::too_many_arguments)]
 pub fn navigation(
     ui: &Ui,
@@ -24,35 +26,42 @@ pub fn navigation(
     let side = m.px(24.0);
     let gap = m.px(8.0);
     let top = y + ((row_h - side) / 2.0).floor();
-    let mut x = right;
+    let size = widgets::button_size(ui, m, "Latest", side);
+    let mut x = right - size[0];
     // Browsing anything but the current session's newest fight (maybe in an older session).
     if latest.is_some_and(|id| id != f.id) {
-        let size = widgets::button_size(ui, m, "Latest", side);
-        x -= size[0];
         if widgets::button(ui, m, "##latest", [x, top], "Latest", side, ButtonStyle::Outline) {
             actions.push(Action::Select(None));
         }
-        x -= gap;
+    } else {
+        widgets::button_off(ui, m, [x, top], "Latest", side);
     }
-    x -= side;
-    if let Some(next) = f.next_id
-        && widgets::icon_button(ui, m, "##newer", [x, top], side, Icon::Right, true)
-    {
-        actions.push(Action::Select(Some(next)));
+    x -= gap + side;
+    match f.next_id {
+        Some(next) => {
+            if widgets::icon_button(ui, m, "##newer", [x, top], side, Icon::Right, true) {
+                actions.push(Action::Select(Some(next)));
+            }
+        }
+        None => widgets::icon_off(ui, m, [x, top], side, Icon::Right),
     }
     let label = match f.index {
         Some(i) => format!("Fight {i} of {}", f.count),
         None => "Fight".to_string(),
     };
     let lw = widgets::text_size(ui, Font::Body12, &label)[0];
-    let slot = lw.max(m.px(62.0));
+    let widest = format!("Fight {0} of {0}", f.count);
+    let slot = lw.max(widgets::text_size(ui, Font::Body12, &widest)[0]).max(m.px(62.0));
     x -= gap + slot;
     widgets::text_mid(ui, Font::Body12, x + (slot - lw) / 2.0, y, row_h, theme::SECONDARY, &label);
     x -= gap + side;
-    if let Some(prev) = f.prev_id
-        && widgets::icon_button(ui, m, "##older", [x, top], side, Icon::Left, true)
-    {
-        actions.push(Action::Select(Some(prev)));
+    match f.prev_id {
+        Some(prev) => {
+            if widgets::icon_button(ui, m, "##older", [x, top], side, Icon::Left, true) {
+                actions.push(Action::Select(Some(prev)));
+            }
+        }
+        None => widgets::icon_off(ui, m, [x, top], side, Icon::Left),
     }
 }
 

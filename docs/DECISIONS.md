@@ -1096,6 +1096,32 @@ Windows scaling at 150%) matched the mockups in look and layout, with two proble
   together and wrapping stays as in the preview. Font sizes are also rounded to whole pixels
   before the Nexus factor is taken out.
 
+## Overlay: in-game UI review (2026-11-26)
+
+Captures of the game window while the user clicked through the overlay at 130% (Fight and
+Session tabs, older fights, a fight opened from the strip, the options and the size switch).
+Fixed, decided with the user:
+
+- **The fight arrows stay put.** At the newest fight the newer arrow and **Latest** were hidden
+  and the row is right-aligned, so the older arrow moved about 130 px right; paging back by
+  clicking twice landed on the label. Every slot is now always drawn, unusable buttons dimmed,
+  and the "Fight n of N" slot fits the session's widest number, so the arrows don't move.
+- **Recurring problems rank by their worst severity.** The session summary kept the severity a
+  problem had in the first fight it appeared in, while the overlay showed the worst one. In the
+  reviewed session "Downed allies were not picked up" (13 of 24 fights, all 13 lost) showed
+  MAJOR but ranked as minor (its count weighs 0.3), below "Outnumbered" (11 lost). The summary
+  now keeps the worst severity, for the ranking, the overlay and the app's Sessions page alike.
+  Analysis output is unchanged.
+- **The keybind has a name in Nexus:** "Toggle WvW Analyzer window" instead of
+  `KB_WVW_ANALYZER_TOGGLE`, in English for every language Nexus ships.
+
+Left as they are: a lone "4." when a fact wraps, the skirmish line's hyphen (code-written
+framing, also in the app) and the session name format (the app's own name).
+Not captured: the "went well" cards, the debrief row, recording, the small panel after a fight.
+Validation: a backend test where ranking by the first severity puts the problems the other way
+round (fails without the fix); the preview's newest-fight state keeps the arrow in place at 460
+and 360 wide; pytest, ruff, cargo test, clippy for Linux and Windows and the DLL build pass.
+
 ## Open items at the time of writing
 
 - The Trends page has its first slice only (results per session). Not built: problems across

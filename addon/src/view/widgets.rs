@@ -288,6 +288,22 @@ pub fn button(
     clicked
 }
 
+/// A button that does nothing here (the newest fight is already on screen): drawn dimmed in its
+/// place, so the buttons around it don't move.
+pub fn button_off(ui: &Ui, m: &Metrics, pos: [f32; 2], label: &str, h: f32) {
+    let size = button_size(ui, m, label, h);
+    outline(ui, pos, [pos[0] + size[0], pos[1] + size[1]], theme::LINE, m.px(4.0));
+    let t = text_size(ui, Font::Body12, label);
+    let at = [pos[0] + (size[0] - t[0]) / 2.0, pos[1] + (size[1] - t[1]) / 2.0];
+    text(ui, Font::Body12, at, theme::DOT_OFF, label);
+}
+
+/// An icon button that does nothing here (no older or newer fight), drawn dimmed.
+pub fn icon_off(ui: &Ui, m: &Metrics, pos: [f32; 2], side: f32, kind: Icon) {
+    rect(ui, pos, [pos[0] + side, pos[1] + side], m.bg(theme::CARD), m.px(4.0));
+    icon(ui, m, [pos[0] + side / 2.0, pos[1] + side / 2.0], kind, theme::DOT_OFF);
+}
+
 /// A square icon button; `fill` draws the card color behind it (the fight arrows).
 pub fn icon_button(
     ui: &Ui,
