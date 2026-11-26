@@ -16,7 +16,7 @@ from logging.handlers import RotatingFileHandler
 
 import uvicorn
 
-from . import diagnostics, paths
+from . import diagnostics, paths, updater
 from .api.app import create_app
 from .config import ConfigStore
 from .state import AppState
@@ -196,24 +196,51 @@ def main(argv: list[str] | None = None) -> None:
     diagnostics.begin_run(data_dir)
     diagnostics.start_heartbeat(data_dir)
     try:
-        _serve(args, config_store, host, port, url)
+        pending = _serve(args, config_store, host, port, url)
     finally:
         diagnostics.end_run(data_dir)
+    # Only after a clean shutdown (an exception skips this): the installer replaces the files
+    # of this app, and restarts it when it is done.
+    if pending is not None:
+        updater.launch_installer(pending)
+
+
+def close_on_exit_request(state: AppState, server: uvicorn.Server,
+                          window_api: WindowApi | None) -> threading.Thread:
+    """Close the app when something asks it to (an update ready to install): the window if
+    there is one (its close runs the normal shutdown below), otherwise the server."""
+    def wait() -> None:
+        state.exit_requested.wait()
+        logging.getLogger("wvw_analyzer").info("closing the app on request")
+        window = window_api._window if window_api else None
+        if window is not None:
+            try:
+                window.destroy()
+                return
+            except Exception:
+                logging.getLogger("wvw_analyzer").exception("could not close the window")
+        server.should_exit = True
+
+    thread = threading.Thread(target=wait, name="exit-request", daemon=True)
+    thread.start()
+    return thread
 
 
 def _serve(args: argparse.Namespace, config_store: ConfigStore, host: str, port: int,
-           url: str) -> None:
+           url: str) -> updater.PendingInstall | None:
+    """Run the app until it closes; returns an update to install, if one is ready."""
     log = logging.getLogger("wvw_analyzer")
     state = AppState(config_store)
     server = uvicorn.Server(uvicorn.Config(create_app(state), host=host, port=port,
                                            log_level="warning", log_config=None,
                                            timeout_graceful_shutdown=SHUTDOWN_TIMEOUT_S))
     if args.no_window or args.browser:
+        close_on_exit_request(state, server, None)
         if args.browser:
             threading.Timer(1.5, lambda: webbrowser.open(url)).start()
         log.info("WvW Analyzer running at %s", url)
         server.run()
-        return
+        return state.updater.take_pending()
 
     thread = threading.Thread(target=server.run, name="uvicorn", daemon=True)
     thread.start()
@@ -222,11 +249,13 @@ def _serve(args: argparse.Namespace, config_store: ConfigStore, host: str, port:
             break
         time.sleep(0.1)
     log.info("WvW Analyzer running at %s", url)
-    if not _open_window(url):
+    window_api = WindowApi()
+    close_on_exit_request(state, server, window_api)
+    if not _open_window(url, window_api):
         log.info("pywebview not available - opening %s in the browser", url)
         webbrowser.open(url)
         thread.join()
-        return
+        return state.updater.take_pending()
     # Window closed: the run ended normally. Say so before the slower cleanup below; at a
     # Windows shutdown the process may be ended before that finishes.
     diagnostics.end_run(paths.data_dir())
@@ -236,6 +265,7 @@ def _serve(args: argparse.Namespace, config_store: ConfigStore, host: str, port:
     state.llm.shutdown(final=True)
     server.should_exit = True
     thread.join(timeout=10)
+    return state.updater.take_pending()
 
 
 if __name__ == "__main__":

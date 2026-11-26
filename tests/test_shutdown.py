@@ -88,7 +88,7 @@ def test_window_close_stops_the_app_with_a_page_connected(tmp_path: Path, monkey
     monkeypatch.setattr(AppState, "stop", lambda self: (stops.append(time.monotonic()),
                                                         real_stop(self)))
 
-    def window(url: str) -> bool:  # the page connects, then the window is closed
+    def window(url: str, api: object = None) -> bool:  # the page connects, then it closes
         with connect(url.replace("http", "ws", 1) + "/ws") as ws:
             assert '"hello"' in ws.recv(timeout=5)
         return True

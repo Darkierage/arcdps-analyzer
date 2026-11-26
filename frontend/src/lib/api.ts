@@ -379,6 +379,31 @@ export interface AppStatus {
 	crashes: CrashRecord[];
 }
 
+/** In-app updater state (GET /api/update, WebSocket event `update`). */
+export interface UpdateStatus {
+	current: string;
+	enabled: boolean;
+	checking: boolean;
+	lastCheck: number | null; // epoch seconds
+	error: string | null;
+	latest: {
+		version: string;
+		notes: string; // plain text from the release page (not signed: never rendered as HTML)
+		url: string;
+		publishedAt: string | null;
+		verified: boolean;
+		verifyError: string | null;
+		size: number | null; // installer bytes, from the signed manifest
+	} | null;
+	available: boolean;
+	skipped: boolean;
+	canInstall: boolean;
+	blockedReason: string | null;
+	download: { state: 'downloading' | 'ready' | 'failed'; done: number; total: number; error: string | null } | null;
+	unfinished: { version: string; canRetry: boolean } | null;
+	releasesUrl: string;
+}
+
 /** A crash or unexpected exit the user hasn't dismissed yet (GET /api/status). */
 export interface CrashRecord {
 	at: string;
@@ -660,6 +685,11 @@ export const api = {
 		request<{ text: string; path: string | null }>('POST', '/api/diagnostics', { userAgent: navigator.userAgent }),
 	openDataFolder: () => request<{ opened: boolean; path: string }>('POST', '/api/diagnostics/open-folder'),
 	dismissCrashes: () => request<{ ok: boolean }>('POST', '/api/diagnostics/dismiss'),
+	update: () => request<UpdateStatus>('GET', '/api/update'),
+	checkUpdate: () => request<UpdateStatus>('POST', '/api/update/check'),
+	skipUpdate: (version: string) => request<UpdateStatus>('POST', '/api/update/skip', { version }),
+	installUpdate: () => request<UpdateStatus>('POST', '/api/update/install'),
+	retryUpdate: () => request<UpdateStatus>('POST', '/api/update/retry'),
 	players: () => request<{ players: PlayerInfo[]; default: string | null }>('GET', '/api/players'),
 	review: (account: string, scope: ReviewScope = {}) => {
 		const q = new URLSearchParams();

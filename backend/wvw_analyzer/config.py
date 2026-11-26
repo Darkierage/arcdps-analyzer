@@ -86,6 +86,9 @@ class Settings(BaseModel):
     detectors: dict[str, dict[str, Any]] = Field(default_factory=dict)
     # The account "My play" opens on; None: the account that recorded the most fights.
     my_account: str | None = None
+    # Ask GitHub for a newer release at start and once a day (plan 17).
+    check_updates: bool = True
+    skipped_update: str | None = None  # "Skip this version": no banner for this version
 
     @field_validator("host")
     @classmethod

@@ -1122,6 +1122,90 @@ Validation: a backend test where ranking by the first severity puts the problems
 round (fails without the fix); the preview's newest-fight state keeps the arrow in place at 460
 and 360 wide; pytest, ruff, cargo test, clippy for Linux and Windows and the DLL build pass.
 
+## In-app updater (2026-11-26)
+
+Friends only learned about a new version when told, then had to find the release page (plan:
+[`plans/17-app-updater.md`](plans/17-app-updater.md)).
+
+- **GitHub Releases only, no other hosting.** `releases/latest` (no login, 60 requests an hour
+  per IP, no drafts or pre-releases) gives the tag, notes and assets, with GitHub's own sha256
+  `digest` per asset.
+- **On by default, switchable** (`check_updates`, Settings > Updates): a check ~30 s after
+  start, then every 24 h while running, and "Check now". This is a deliberate exception to "no
+  network beyond what's needed": the request carries a generic User-Agent
+  (`wvw-analyzer/<version>`) and nothing about the user. Failures are logged at INFO and never
+  shown as an error banner.
+- **Download only on click.** "Install and restart" downloads the installer; nothing is fetched
+  in the background (the check reads only the small manifest files, and only when the release
+  is newer). Decided over a background
+  download: ~57 MB per release for everyone is more traffic than the wait saves.
+- **Signed manifest (Ed25519).** The installer isn't code-signed and a file downloaded by
+  Python has no Mark-of-the-Web, so the app's own checks are the only gate. GitHub's digest
+  proves the download matches the upload, not who uploaded it. Each release carries
+  `latest.json` (version, installer name, size, sha256) and `latest.json.sig`; the app trusts
+  the keys in `updater.TRUSTED_KEYS` (a list, so a key can be rotated). Before the installer
+  runs: the signature matches a trusted key, the signed version is newer than the running one
+  and equals the tag (no replaying an old signed release), the file has the signed size and
+  sha256 and GitHub's digest, and the name is `WvWAnalyzer-Setup-<version>.exe`. The cached
+  manifest is re-verified at download time and the file re-hashed right before it runs. A
+  release without a valid manifest is announced with a link only. Release notes are unsigned:
+  shown as plain text. Accepted: someone with the GitHub account can hide an update, not push
+  one. The private key stays outside the repo, passphrase-protected
+  (`scripts/release_sign.py`). `cryptography` is the new dependency (the standard library has
+  no Ed25519; a hand-written verifier wasn't worth the risk).
+- **Install hand-off.** The install endpoint takes no body: it uses only the release from the
+  app's own last check. It is refused while recording or while logs are queued (the installer
+  closes the app), and checked again after the download. When the file is verified, the app
+  sets an exit request; `main.py` closes the window (or stops the server), the normal shutdown
+  runs (the run is marked as closed normally, llama-server stops), and only after a clean
+  shutdown the installer starts detached with `/SILENT /SUPPRESSMSGBOXES /NORESTART
+  /RELAUNCH=1`. The child gets `PYINSTALLER_RESET_ENVIRONMENT=1`, no `_PYI*`/`_MEIPASS*`
+  variables and a reset DLL directory, so neither the installer nor the restarted app inherits
+  the frozen app's bootloader state. Error 740 (elevation needed) falls back to ShellExecute.
+- **Installer restart entry.** `[Run]` gets `nowait runasoriginaluser; Check: ShouldRelaunch`,
+  reading `{param:RELAUNCH|0}`: Inno's `{param:}` only sees `/Name=Value`, so a bare
+  `/RELAUNCH` would never restart the app (found in the plan review, from Inno's source).
+  `runasoriginaluser`: after an all-users (elevated) install the app must not restart as the
+  admin account, with another data folder.
+- **Unfinished updates.** `update.json` in the data folder records the attempted version. If the
+  next start still runs an older version (UAC declined, install aborted), a banner offers to run
+  the kept installer again with its normal wizard (re-hashed first). At startup old installers
+  in `updates/` are deleted; a file in use (the installer that just restarted the app) is left
+  for the next start.
+- **Banner rules.** "Later" (until the app restarts) and "Skip this version" hide the offer,
+  also after a failed download; only a download in progress keeps it up. Checks turned off
+  also hide the banner for a release found earlier (Settings still shows it). The "did not
+  finish" banner has its own Later, and a release newer than the unfinished one replaces it.
+  The page re-reads the update status after recording or queue events, so an install blocked
+  by recording becomes available once it stops.
+- **Errors.** A malformed reply (`http.client` errors are not `OSError`) counts as "could not
+  reach GitHub"; the daily loop survives any error; a download that fails in any way ends as
+  "failed".
+- **Only the installed Windows app installs.** From source the app checks and links to the
+  release page.
+- **Testing hooks.** `WVW_UPDATE_API` points the check at another URL (plain HTTP allowed then);
+  `WVW_UPDATE_TEST_KEY` adds a trusted key only together with it, so the production key never
+  signs a test release.
+
+Validation: `tests/test_updater.py` (37 tests: versions, a signed release, same/older versions, a
+tag that isn't a version, offline, no manifest, tampered/wrong-key/mismatched/replayed manifests,
+asset size and digest mismatches, a build without keys, the test key rule, skip, download and
+exit request, busy before and during the download, a tampered download, an edited cache,
+unfinished update and retry, cleanup with a locked file, installer arguments and environment,
+the re-hash before launch, the window/server close, launch only after a clean shutdown, the
+API with the Origin rule, the signing script round trip, the installer script's restart entry;
+after the review: no manifest requests when up to date, malformed replies, the loop surviving
+an error) and a frontend test for the banner rules. An independent use-case review found six
+issues (a failed download kept the banner, no refresh after recording stopped, manifest
+requests on every check, `http.client` errors, checks off kept the banner, the unfinished
+banner could not be hidden); all are fixed with tests, except the refresh after recording
+stops, which is checked by reading only (the live store isn't unit-testable). Run against a local fake release server: the automatic
+check after ~30 s verified a test-signed release without downloading the installer; with
+installing allowed, the install click downloaded and verified the file, the app closed itself
+cleanly (no run marker left) and handed over the installer; the next start reported the update
+as unfinished. Not run: the Windows install itself (needs the user, see the plan's validation
+list).
+
 ## Open items at the time of writing
 
 - The Trends page has its first slice only (results per session). Not built: problems across
@@ -1130,4 +1214,7 @@ and 360 wide; pytest, ruff, cargo test, clippy for Linux and Windows and the DLL
 - My play's cause, distance and CC rules are off by default after a calibration on one
   recording player's three raid days; with more players' logs they may hold.
 - The installer and exe are not code-signed (SmartScreen warning). Signing needs a paid
-  certificate or signing service.
+  certificate or signing service. The in-app updater checks its own Ed25519 signature instead.
+- The updater's Windows end-to-end test (per-user and all-users install, UAC declined, an
+  aborted install, Smart App Control) is still to be run by the user, and `TRUSTED_KEYS` is
+  empty until the signing key is created.

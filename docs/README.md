@@ -36,6 +36,8 @@
       review of plan 14: session strip scrolls, fonts on the heap, tile values wrap (2026-11-25)
   16. [`16-player-improvement.md`](plans/16-player-improvement.md) — personal improvement
       ("My play"): per-player recap and profile from the logs (2026-11-25)
+  17. [`17-app-updater.md`](plans/17-app-updater.md) — in-app updater: GitHub Releases check,
+      Ed25519-signed manifest, one-click install and restart (2026-11-26)
 
 Each plan starts with a status line saying whether it was implemented and where the
 implementation deviated. New larger features get the next numbered plan once it is approved,

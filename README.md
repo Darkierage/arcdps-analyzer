@@ -264,7 +264,15 @@ Run `WvWAnalyzer-Setup-<version>.exe`.
   your PC". Click **More info → Run anyway**.
 - **First launch** shows a short setup screen: the arcdps log folder (usually found
   automatically), a parser check, and an optional download of the AI debrief model.
-- **Upgrading:** run the newer setup. It closes the running app and keeps all your data.
+- **Updates:** from 0.8.0 on, the app checks GitHub for a newer release when it starts and once a
+  day, and shows a banner. **Install and restart** downloads the update, checks that it is a
+  release signed by the app's author, closes the app, runs the installer and starts the app
+  again. Nothing is downloaded until you click. The check sends one request to GitHub (two more
+  for the small signed manifest when a new version is out), with no account, folder or fight
+  data. Turn it off in **Settings > Updates** (that also hides the banner). If an
+  update doesn't finish, the next start offers to run the installer again.
+- **Upgrading by hand:** run the newer setup. It closes the running app and keeps all your data.
+  0.7.0 and older have no updater, so install the first version with it by hand.
 - **Uninstalling** (Windows *Apps & features*) asks whether to also delete your analyzed fights
   and settings in `%LOCALAPPDATA%\WvWAnalyzer`. The default is to keep them. Your arcdps logs are
   never touched.
@@ -274,7 +282,7 @@ Run `WvWAnalyzer-Setup-<version>.exe`.
 If something goes wrong, open **Settings > Troubleshooting** and click **Copy diagnostics**,
 then paste the result into a message to whoever helps you. It holds the app version, the setup
 checks, recent errors and crashes, and the end of the app log, with your Windows user name and
-account names removed. Nothing is sent anywhere automatically. The same report is saved as
+account names removed. The diagnostics are never sent anywhere automatically. The same report is saved as
 `diagnostics.txt` in `%LOCALAPPDATA%\WvWAnalyzer` (**Open app folder**). Each app start
 writes its own log in the `logs` folder there, so the log of a run that crashed is still there
 after a restart. Logs are kept for 14 days (at most 30 runs and 100 MB).
@@ -299,6 +307,29 @@ The build does the following:
 - builds the app with PyInstaller and bundles `bin\addon\WvWAnalyzer.dll`;
 - compiles `packaging/installer.iss`.
 
+### Releasing (signed for the in-app updater)
+
+The app installs only a release whose `latest.json` is signed with a key listed in
+`TRUSTED_KEYS` in `backend/wvw_analyzer/updater.py`. Once, in WSL:
+
+```bash
+uv run python scripts/release_sign.py keygen   # passphrase-protected key in ~/.wvw-analyzer/
+```
+
+Paste the printed public key into `TRUSTED_KEYS`, and back up the key file (never commit it).
+Per release, after building the installer on Windows and copying it back to `dist/`:
+
+```bash
+uv run python scripts/release_sign.py sign dist/WvWAnalyzer-Setup-X.Y.Z.exe
+gh release create vX.Y.Z dist/WvWAnalyzer-Setup-X.Y.Z.exe dist/latest.json \
+    dist/latest.json.sig --notes-file notes.md
+```
+
+The release notes are shown in the app ("What's new"), as plain text. A release without the two
+manifest files is still announced, with a link to the release page only. To test updates
+against a local server, set `WVW_UPDATE_API` (the release JSON URL) and `WVW_UPDATE_TEST_KEY` (a
+test public key; honoured only together with `WVW_UPDATE_API`).
+
 The version comes from `backend/wvw_analyzer/__init__.py`.
 
 ## Layout
@@ -311,10 +342,12 @@ The version comes from `backend/wvw_analyzer/__init__.py`.
 - `backend/wvw_analyzer/llm`: llama-server lifecycle and debrief prompt
 - `backend/wvw_analyzer/api`: FastAPI REST and WebSocket; serves the built UI
 - `backend/wvw_analyzer/addon_install.py`: install, update and remove the in-game overlay
+- `backend/wvw_analyzer/updater.py`: update check, signed manifest, download and installer
+  hand-off (`scripts/release_sign.py` signs releases)
 - `addon/`: the in-game overlay, a Rust Nexus addon (nexus-rs); `src/view` draws it,
   `examples/preview` renders it to images
 - `frontend/`: SvelteKit + Tailwind + ECharts
-- `scripts/`: tool setup, calibration, addon and Windows builds
+- `scripts/`: tool setup, calibration, addon and Windows builds, release signing
 - `packaging/`: PyInstaller spec, Inno Setup script, icon
 - `docs/`: decisions (`DECISIONS.md`) and the approved plans (`plans/`)
 

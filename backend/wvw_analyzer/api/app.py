@@ -61,6 +61,10 @@ class DiagnosticsRequest(BaseModel):
     userAgent: str | None = None
 
 
+class SkipBody(BaseModel):
+    version: str
+
+
 class ClientError(BaseModel):
     message: str = ""
     stack: str | None = None
@@ -400,6 +404,35 @@ def create_app(state: AppState) -> FastAPI:
     def llm_unload() -> dict[str, Any]:
         state.llm.shutdown()
         return state.llm.status()
+
+    # ---- updates (plan 17) ------------------------------------------------------------
+    @app.get("/api/update")
+    def update_status() -> dict[str, Any]:
+        return state.updater.status()
+
+    @app.post("/api/update/check")
+    def update_check() -> dict[str, Any]:
+        return state.updater.check()
+
+    @app.post("/api/update/skip")
+    def update_skip(body: SkipBody) -> dict[str, Any]:
+        state.config.update({"skipped_update": body.version.strip()[:32] or None})
+        return state.updater.status()
+
+    @app.post("/api/update/install")
+    def update_install() -> dict[str, Any]:
+        # No body: only the release found by the app's own last check is ever installed.
+        try:
+            return state.updater.install()
+        except ValueError as e:
+            raise HTTPException(409, str(e)) from e
+
+    @app.post("/api/update/retry")
+    def update_retry() -> dict[str, Any]:
+        try:
+            return state.updater.retry_unfinished()
+        except ValueError as e:
+            raise HTTPException(409, str(e)) from e
 
     # ---- troubleshooting --------------------------------------------------------------
     @app.post("/api/diagnostics")
