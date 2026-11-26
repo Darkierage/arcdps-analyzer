@@ -106,11 +106,13 @@ fn register_fonts(scale: f32) {
     store_f32(&FONT_FACTOR, 0.0);
 }
 
-/// Keeps the fonts at the type scale times the UI scale. Nexus may build a font larger than
-/// asked (seen in game: 1.5 times, Windows scaling at 150% with Nexus's DPI scaling on), while the layout uses the UI
-/// scale alone; the first font handed over gives that factor, and every font is then asked for
-/// that much less. Also follows the player changing the game's interface size. Called each frame
-/// on the render thread.
+/// Keeps the fonts at the type scale times `scale` (the UI scale times the size option), rounded
+/// to whole pixels, which draw a little cleaner. Nexus may build a font larger than asked (seen
+/// in game: 1.5 times, Windows scaling at 150% with Nexus's DPI scaling on), while the layout
+/// uses `scale` alone; the first font handed over gives that factor, and every font is then
+/// asked for that much less. Follows the interface size and the size option. Called each frame
+/// on the render thread with the addon's lock held: safe, since Nexus's font callback only
+/// stores pointers.
 fn follow_scale(scale: f32) {
     let mut factor = load_f32(&FONT_FACTOR);
     if factor == 0.0 {
@@ -126,7 +128,7 @@ fn follow_scale(scale: f32) {
         }
     }
     for f in Font::ALL {
-        let size = f.size() * scale / factor;
+        let size = (f.size() * scale).round() / factor;
         if (size - load_f32(&ASKED[f.index()])).abs() > 0.01 {
             store_f32(&ASKED[f.index()], size);
             resize_font(f.id(), size);
@@ -150,9 +152,13 @@ fn load() {
     register_render(
         RenderType::Render,
         render!(|ui: &Ui| {
-            let scale = ui_scale();
-            follow_scale(scale);
-            with_app("render", |app| app.render(ui, in_combat(), scale))
+            let ui_scale = ui_scale();
+            with_app("render", |app| {
+                // The size option scales text and layout together, so proportions stay.
+                let scale = ui_scale * app.size_factor();
+                follow_scale(scale);
+                app.render(ui, in_combat(), scale)
+            })
         }),
     )
     .revert_on_unload();

@@ -1087,6 +1087,14 @@ Windows scaling at 150%) matched the mockups in look and layout, with two proble
   size", the heading is 212 px wide (1.64 times the preview, against a layout scale of 1.67),
   the Squad tile's label takes two lines at 360 wide, and the addon wrote no debug or trace
   lines.
+- **A size option.** At the mockups' proportions the body text (13 px at scale 1) was about
+  20% smaller than the game's own text and arcdps's at interface size Larger, and Inter
+  Regular's strokes (under 2 px at 4K) looked soft. Decided with the user: an option rather
+  than a bigger type scale for everyone. *Size* in the addon's Nexus options offers 100%
+  (default, the mockups), 115% and 130%, stored as `size` in `settings.json` (a missing value
+  is 100%, any other the nearest choice). It multiplies the UI scale, so text and layout grow
+  together and wrapping stays as in the preview. Font sizes are also rounded to whole pixels
+  before the Nexus factor is taken out.
 
 ## Open items at the time of writing
 

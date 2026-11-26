@@ -3,7 +3,7 @@
 
 use crate::client::{Client, Command};
 use crate::model::NewFights;
-use crate::settings::{AfterFight, Settings};
+use crate::settings::{AfterFight, SIZES, Settings};
 use crate::view::glance::{self, GlanceAction, GlanceRules};
 use crate::view::{self, Action};
 use imgui::{Slider, Ui};
@@ -92,6 +92,11 @@ impl App {
         }
     }
 
+    /// The size setting as a factor on Nexus's UI scale.
+    pub fn size_factor(&self) -> f32 {
+        self.settings.size_factor()
+    }
+
     pub fn render(&mut self, ui: &Ui, in_combat: bool, scale: f32) {
         self.track_new_fights(in_combat);
         self.render_glance(ui, in_combat, scale);
@@ -149,6 +154,13 @@ impl App {
         );
         ui.radio_button("Open the full window", &mut self.settings.after_fight, AfterFight::Window);
         ui.radio_button("Do nothing", &mut self.settings.after_fight, AfterFight::Nothing);
+        ui.text("Size (text and window):");
+        for (i, size) in SIZES.into_iter().enumerate() {
+            if i > 0 {
+                ui.same_line();
+            }
+            ui.radio_button(format!("{size}%"), &mut self.settings.size, size);
+        }
         ui.checkbox("Hide the window in combat", &mut self.settings.hide_in_combat);
         Slider::new("Background opacity", 0.0, 1.0)
             .display_format("%.2f")

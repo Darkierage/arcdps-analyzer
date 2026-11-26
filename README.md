@@ -121,8 +121,8 @@ The overlay shows the analyzer's results in game:
 - **In game:** the Quick Access icon or **ALT+SHIFT+W** (rebindable in Nexus) toggles the
   window; drag it by its header. Options in Nexus → Addons → WvW Analyzer: *After a fight*
   (show the small panel, open the full window, or do nothing; only once you're out of combat),
-  hide the window in combat, background opacity. The text uses Inter and follows the game's
-  interface size.
+  *Size* (100%, 115% or 130%: text and window together), hide the window in combat, background
+  opacity. The text uses Inter and follows the game's interface size.
 - **Timing:** a fight shows up once the app has analyzed its log, usually within half a minute
   of the fight ending. The window follows the current session; while you browse older fights,
   **Latest** goes back to the newest one.

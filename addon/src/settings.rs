@@ -15,6 +15,9 @@ pub enum AfterFight {
     Nothing,
 }
 
+/// The overlay's size choices, in percent of the mockups at the game's interface size.
+pub const SIZES: [u32; 3] = [100, 115, 130];
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Settings {
     pub after_fight: AfterFight,
@@ -22,13 +25,21 @@ pub struct Settings {
     pub hide_in_combat: bool,
     /// Window background opacity, 0..1.
     pub opacity: f32,
+    /// Text and layout size in percent, one of `SIZES`.
+    pub size: u32,
     /// Whether the window was open when the game closed.
     pub open: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { after_fight: AfterFight::Panel, hide_in_combat: true, opacity: 0.85, open: false }
+        Self {
+            after_fight: AfterFight::Panel,
+            hide_in_combat: true,
+            opacity: 0.85,
+            size: 100,
+            open: false,
+        }
     }
 }
 
@@ -41,6 +52,7 @@ struct Stored {
     auto_show: Option<bool>,
     hide_in_combat: Option<bool>,
     opacity: Option<f32>,
+    size: Option<u32>,
     open: Option<bool>,
 }
 
@@ -58,6 +70,7 @@ impl Stored {
             after_fight,
             hide_in_combat: self.hide_in_combat.unwrap_or(d.hide_in_combat),
             opacity: self.opacity.unwrap_or(d.opacity),
+            size: self.size.unwrap_or(d.size),
             open: self.open.unwrap_or(d.open),
         }
     }
@@ -85,7 +98,14 @@ impl Settings {
             self.opacity = Settings::default().opacity;
         }
         self.opacity = self.opacity.clamp(0.0, 1.0);
+        // A size this addon doesn't offer (edited by hand, or a newer addon): the nearest choice.
+        self.size = SIZES.into_iter().min_by_key(|s| s.abs_diff(self.size)).unwrap_or(100);
         self
+    }
+
+    /// The size setting as a factor on the UI scale.
+    pub fn size_factor(&self) -> f32 {
+        self.size as f32 / 100.0
     }
 }
 
@@ -108,6 +128,14 @@ mod tests {
         assert_eq!(loaded.after_fight, AfterFight::Window);
         assert_eq!(loaded.opacity, 1.0);
         assert!(!std::fs::read_to_string(&path).unwrap().contains("auto_show"));
+        assert_eq!(loaded.size, 100); // files from before the option get the mockup size
+        let s = Settings { size: 130, ..Settings::default() };
+        s.save(&path).unwrap();
+        assert_eq!(Settings::load(&path).size_factor(), 1.3);
+        for (stored, size) in [(120, 115), (500, 130), (0, 100)] {
+            std::fs::write(&path, format!(r#"{{"size": {stored}}}"#)).unwrap();
+            assert_eq!(Settings::load(&path).size, size, "stored {stored}");
+        }
         std::fs::write(&path, "not json").unwrap();
         assert_eq!(Settings::load(&path), Settings::default());
         std::fs::remove_dir_all(dir).unwrap();
