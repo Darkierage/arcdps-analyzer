@@ -1342,5 +1342,6 @@ in 6 full runs of the previous commit).
 - The installer and exe are not code-signed (SmartScreen warning). Signing needs a paid
   certificate or signing service. The in-app updater checks its own Ed25519 signature instead.
 - The updater's Windows end-to-end test (per-user and all-users install, UAC declined, an
-  aborted install, Smart App Control) is still to be run by the user, and `TRUSTED_KEYS` is
-  empty until the signing key is created.
+  aborted install, Smart App Control) is still to be run by the user. The release signing key
+  was created for 0.8.0 (its public key is in `TRUSTED_KEYS`; the private key stays with the
+  maintainer, outside the repo).

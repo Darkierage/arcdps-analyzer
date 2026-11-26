@@ -485,6 +485,7 @@ def test_update_api(tmp_path, monkeypatch):
     http = FakeHttp()
     state.updater.http = http
     state.updater.can_install = True
+    state.updater.current = CURRENT  # the release below must be newer than the running app
     publish(http, "0.8.0")
     client = TestClient(create_app(state))
     with client:

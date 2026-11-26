@@ -45,7 +45,9 @@ UA = {"User-Agent": f"wvw-analyzer/{__version__}", "Accept": "application/vnd.gi
 # so a new key can be shipped in a release signed by the old one. Empty: no release can be
 # installed from the app (it only links to the release page). `scripts/release_sign.py keygen`
 # prints the line to put here.
-TRUSTED_KEYS: list[str] = []
+TRUSTED_KEYS: list[str] = [
+    "/HDjOsI8PJFw2MFEoMmyct7aSDOwGFZLvCjZ1trV/X4=",  # release key, created 2026-11-26 for 0.8.0
+]
 
 # Testing only: point the app at a local server and trust a test key. The test key is honoured
 # only together with the API override, so the production key never signs a test release.
