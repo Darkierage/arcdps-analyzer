@@ -1304,6 +1304,27 @@ that fails without the fix:
   the loop reconnects after any error, and requests waiting for an answer fail as soon as the
   connection closes instead of after their 5 s timeout.
 
+### Test with a real OBS on Windows (2026-11-26)
+
+`main` run natively on Windows (a WSL app can't reach OBS in WSL's NAT mode, and OBS reports
+Windows paths), with a separate data folder, against OBS 32.2.2 (WebSocket 5.7.4) recording
+MKV with NVENC AV1:
+
+- OBS not running: "OBS is not reachable" in Settings and the header; nothing else affected.
+  No password: "OBS asks for a password". With it: "Connected to OBS 32.2.2".
+- **Record** in the app started OBS; the row's start was 0.58 s after the second in OBS's file
+  name. **Stop** stopped it and linked `<Videos>\2026-11-26 22-35-49.mkv`; the row spans
+  37.76 s, the file is 37.50 s.
+- With a test fight starting 10.42 s into that recording, the Replay tab showed the 1080p AV1
+  MKV in Chrome at exactly the expected second, and in step while playing.
+- **Fixed:** the browser played an old file for a reused video id. The file route sent no cache
+  header, and an id comes back after the newest video is unlinked (here: another data folder
+  on the same port). The route now sends `Cache-Control: no-cache`, and the page asks for
+  `/api/videos/<id>/file?v=<start>`, so a different file is a different address. Tested in the
+  API and frontend tests.
+- Not covered: the app's own WebView2 window (Chrome was used), pausing, file splitting and the
+  leftover notice with the real OBS (covered against the fake server).
+
 Left as is: `tests/test_api.py::test_status_settings_and_fight` sometimes fails when its
 WebSocket test session closes (`CancelledError`); it fails the same way without plan 18 (once
 in 6 full runs of the previous commit).
@@ -1315,9 +1336,9 @@ in 6 full runs of the previous commit).
   commander.
 - My play's cause, distance and CC rules are off by default after a calibration on one
   recording player's three raid days; with more players' logs they may hold.
-- Replay and video (plan 18), to check on Windows: MKV and MP4 playback in the app's WebView2
-  window, a real OBS (28+) session with Record / Stop, and the sync error against a visible
-  event. No map image for Seared Borderlands.
+- Replay and video (plan 18), to check on Windows: playback in the app's WebView2 window (Chrome
+  plays OBS's AV1 MKV), and the sync error against a visible in-game event. Record / Stop with a
+  real OBS works. No map image for Seared Borderlands.
 - The installer and exe are not code-signed (SmartScreen warning). Signing needs a paid
   certificate or signing service. The in-app updater checks its own Ed25519 signature instead.
 - The updater's Windows end-to-end test (per-user and all-users install, UAC declined, an

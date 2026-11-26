@@ -386,7 +386,7 @@
 			<!-- svelte-ignore a11y_media_has_caption -->
 			<video
 				use:bindVideo={vv.id}
-				src={videoUrl(vv.id)}
+				src={videoUrl(vv)}
 				preload="metadata"
 				playsinline
 				controls={adjusting === vv.id}

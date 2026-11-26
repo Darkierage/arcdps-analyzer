@@ -135,6 +135,10 @@ def router(state: AppState) -> APIRouter:
         path = Path(v["path"]) if v.get("path") else None
         if path is None or not path.is_file() or not vid.is_video(path):
             raise HTTPException(404, "Video file not found")
-        return FileResponse(path, media_type=vid.media_type(path))
+        # no-cache: the browser must check before reusing a copy. A video id can come back
+        # for another file (unlinking the newest video frees its id), and the window then
+        # played the old file from its cache.
+        return FileResponse(path, media_type=vid.media_type(path),
+                            headers={"Cache-Control": "no-cache"})
 
     return r

@@ -106,3 +106,10 @@ test('outside the file: notes and labels', () => {
 	assert.equal(offsetLabel(1500), '+1.5 s');
 	assert.equal(offsetLabel(-2000), '−2 s');
 });
+
+test('a reused video id gets another address (no cached copy of the old file)', async () => {
+	const { videoUrl } = await import('#lib/api.ts');
+	const a = videoUrl({ id: 1, startMs: 1000 });
+	assert.equal(a, '/api/videos/1/file?v=1000');
+	assert.notEqual(a, videoUrl({ id: 1, startMs: 2000 }));
+});

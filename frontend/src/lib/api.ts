@@ -798,6 +798,8 @@ export const api = {
 	obsLeftover: (action: 'stop' | 'keep') => request<ObsStatus>('POST', '/api/obs/leftover', { action })
 };
 
-/** The video file's URL (served with Range support, by id only). */
-export const videoUrl = (id: number) => `/api/videos/${id}/file`;
+/** The video file's URL (served with Range support, by id only). The start time in the query
+ * makes a reused id (another file) a different address, so no cached copy of the old file
+ * is played. */
+export const videoUrl = (v: Pick<VideoRow, 'id' | 'startMs'>) => `/api/videos/${v.id}/file?v=${v.startMs}`;
 export const replayMapUrl = (key: string) => `/api/replay-maps/${key}`;

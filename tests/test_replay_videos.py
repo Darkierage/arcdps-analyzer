@@ -218,6 +218,8 @@ def test_video_api_link_cover_sync_and_serve(tmp_path: Path):
         r = client.get(f"/api/videos/{row['id']}/file", headers={"Range": "bytes=0-99"})
         assert r.status_code == 206 and len(r.content) == 100
         assert r.headers["content-type"] == "video/mp4"
+        # A reused id may point at another file: the browser must revalidate its copy.
+        assert r.headers["cache-control"] == "no-cache"
         assert client.get("/api/videos/999/file").status_code == 404
 
         # Unlinking keeps the file.
