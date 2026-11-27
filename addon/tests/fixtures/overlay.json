@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "version": "0.8.0",
+  "version": "0.8.1",
   "recording": {
     "active": false,
     "logDirOk": true
@@ -11,7 +11,7 @@
   },
   "latest": {
     "id": 2,
-    "addedAt": "2026-11-26T23:05:59"
+    "addedAt": "2026-11-27T22:58:17"
   },
   "session": {
     "id": 1,
