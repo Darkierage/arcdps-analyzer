@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from . import videos as vid
+from .updater import REPO
 
 log = logging.getLogger(__name__)
 
@@ -38,6 +39,9 @@ AUTH_FAILED = 4009  # WebSocketCloseCode::AuthenticationFailed
 REQUEST_TIMEOUT_S = 5.0
 ADOPT_MATCH_MS = 3000  # an open OBS row this close to a recording's start is that recording
 LABEL = "OBS"
+RATE_POLL_S = 30.0  # while OBS records, ask for its bytes written this often (plan 19)
+RATE_MIN_MS = 60_000  # a rate counts once this much is recorded (the start is noisy)
+SIZE_GUIDE_URL = f"https://github.com/{REPO}#keep-obs-recordings-small"
 
 
 class ObsError(RuntimeError):
@@ -57,6 +61,17 @@ def auth_string(password: str, salt: str, challenge: str) -> str:
 
 def now_ms() -> int:
     return int(time.time() * 1000)
+
+
+def gb_per_hour(size_bytes: Any, duration_ms: Any) -> float | None:
+    """GB (10^9 bytes) written per hour of recording; None under RATE_MIN_MS or without bytes."""
+    try:
+        size, ms = float(size_bytes or 0), float(duration_ms or 0)
+    except (TypeError, ValueError):
+        return None
+    if size <= 0 or ms < RATE_MIN_MS:
+        return None
+    return size / 1e9 / (ms / 3_600_000)
 
 
 def _norm(path: str | None) -> str | None:
@@ -240,12 +255,19 @@ class ObsService:
         self._pause_start: int | None = None
         self._start_requested: float | None = None
         self._record_dir: Path | None = None
+        # GB per hour OBS writes: {"gbPerHour", "live" (still recording), "seconds"} (plan 19).
+        self._rate: dict[str, Any] | None = None
+        self._rate_thread: threading.Thread | None = None
+        self.rate_poll_s = RATE_POLL_S
 
     # ---- lifecycle ---------------------------------------------------------------------------
     def start(self) -> None:
         if self._thread is None:
             self._thread = threading.Thread(target=self._loop, name="obs-connect", daemon=True)
             self._thread.start()
+            self._rate_thread = threading.Thread(target=self._rate_loop, name="obs-rate",
+                                                 daemon=True)
+            self._rate_thread.start()
 
     def stop(self) -> None:
         self._stop.set()
@@ -261,18 +283,23 @@ class ObsService:
         self._wake.set()
 
     def status(self) -> dict[str, Any]:
-        enabled = self.config.settings.obs.enabled
-        return {"enabled": enabled, "state": self._state if enabled else "off",
+        s = self.config.settings.obs
+        rate = self._rate
+        warn = bool(rate and s.warn_gb_per_hour > 0 and rate["gbPerHour"] >= s.warn_gb_per_hour)
+        return {"enabled": s.enabled, "state": self._state if s.enabled else "off",
                 "recording": self._recording, "paused": self._paused,
-                "version": self._version, "error": self._error, "leftover": self._leftover}
+                "version": self._version, "error": self._error, "leftover": self._leftover,
+                "rate": rate, "rateWarning": warn, "warnGbPerHour": s.warn_gb_per_hour,
+                "sizeGuideUrl": SIZE_GUIDE_URL}
 
-    def _publish(self) -> None:
+    def publish(self) -> None:
+        """Send the status to the pages (also after a settings change that needs no reconnect)."""
         self.bus.publish({"type": "obs", "obs": self.status()})
 
     def _set_state(self, state: str, error: str | None = None) -> None:
         if (state, error) != (self._state, self._error):
             self._state, self._error = state, error
-            self._publish()
+            self.publish()
 
     def _loop(self) -> None:
         backoff = 2.0
@@ -321,6 +348,12 @@ class ObsService:
             self._wake.wait(1)
             self._wake.clear()
 
+    def _rate_loop(self) -> None:
+        """While OBS records, ask how much it has written (on the worker, like every request)."""
+        while not self._stop.wait(self.rate_poll_s):
+            if self._recording and self._conn is not None:
+                self._submit(self._poll_rate)
+
     def _submit(self, fn: Callable[..., None], *args: Any) -> None:
         def run() -> None:
             try:
@@ -328,7 +361,7 @@ class ObsService:
             except ObsError as e:
                 log.warning("OBS: %s", e)
                 self._error = str(e)
-                self._publish()
+                self.publish()
             except Exception:
                 log.exception("OBS handling failed")
         try:
@@ -367,7 +400,7 @@ class ObsService:
                 elif self._current is not None:
                     self.db.update_video(self._current, started_by_app=False)
                 self._leftover = False
-                self._publish()
+                self.publish()
             finally:
                 done.set()
         self._submit(run)
@@ -393,15 +426,22 @@ class ObsService:
             if row and row.get("started_by_app") and not self.recorder.recording:
                 # The app was closed (or crashed) while its recording ran.
                 self._leftover = True
+            self._live_rate(st)
         self._resolve_pending()
+        if not self._recording:
+            self._last_recording_rate()
         if not self._recording and self.recorder.recording and self._settings().control_recording:
             self._start_obs()
-        self._publish()
+        self.publish()
 
     def _on_disconnected(self) -> None:
         self._current = None
         self._pause_start = None
         self._start_requested = None
+        # A rate measured so far is no longer "this recording": OBS may come back writing
+        # another one, which gets its own once a minute of it is recorded.
+        if self._rate_finished():
+            self.publish()
 
     def _app_started(self) -> None:
         if not self._settings().control_recording or self._conn is None:
@@ -410,7 +450,8 @@ class ObsService:
         if st.get("outputActive"):
             self._recording = True
             self._adopt(st, now_ms(), link=True)
-            self._publish()
+            self._live_rate(st)
+            self.publish()
         else:
             self._start_obs()
 
@@ -449,8 +490,9 @@ class ObsService:
             self._leftover = False
             if self._current is not None:
                 self._finish(self._current, path, at)
+            self._rate_stopped(self._current)
             self._current = None
-        self._publish()
+        self.publish()
 
     def _file_changed(self, new_path: str | None, at: int) -> None:
         """OBS split the recording: the current file ends now and the new one starts now."""
@@ -464,6 +506,72 @@ class ObsService:
         self._current = self._link(path=_norm(new_path), start_ms=at,
                                    started_by_app=bool(prev and prev.get("started_by_app")),
                                    approximate=False)
+
+    # ---- recording size (plan 19) ---------------------------------------------------------------
+    def _poll_rate(self) -> None:
+        if not self._recording:
+            return
+        if self._live_rate(self._request("GetRecordStatus")):
+            self.publish()
+
+    def _live_rate(self, st: dict[str, Any]) -> bool:
+        """The rate of the recording OBS is writing, from its status. True when it changed."""
+        if not st.get("outputActive"):
+            return False
+        gbh = gb_per_hour(st.get("outputBytes"), st.get("outputDuration"))
+        if gbh is None:
+            return False
+        return self._set_rate(gbh, live=True, seconds=int(st["outputDuration"]) // 1000)
+
+    def _file_rate(self, video_id: int | None) -> bool:
+        """The rate of a finished recording, from its file: size over length minus pauses.
+        Not for an approximate row: its length may be off by the time the start is."""
+        v = self.db.video(video_id) if video_id is not None else None
+        if not v or not v.get("path") or v.get("end_ms") is None or v.get("approximate"):
+            return False
+        try:
+            size = Path(v["path"]).stat().st_size
+        except OSError:
+            return False
+        ms = v["end_ms"] - v["start_ms"] - sum(max(0, b - a) for a, b in v.get("pauses") or [])
+        gbh = gb_per_hour(size, ms)
+        if gbh is None:
+            return False
+        return self._set_rate(gbh, live=False, seconds=int(ms) // 1000)
+
+    def _set_rate(self, gbh: float, live: bool, seconds: int) -> bool:
+        rate = {"gbPerHour": round(gbh, 1), "live": live, "seconds": seconds}
+        old = self._rate
+        self._rate = rate
+        # Publish only what the page shows: the rounded rate and whether it's still recording.
+        return old is None or (old["gbPerHour"], old["live"]) != (rate["gbPerHour"], live)
+
+    def _rate_finished(self) -> bool:
+        """A live rate (only ever the recording OBS is writing) becomes the last recording's."""
+        if self._rate and self._rate["live"]:
+            self._rate = {**self._rate, "live": False}
+            return True
+        return False
+
+    def _rate_stopped(self, video_id: int | None) -> None:
+        """OBS stopped. A sample of this recording (live) stays, no longer live: OBS's own
+        count is safer than the row's span, whose start may be off. Without one (it ran under a
+        minute and a half), the finished file's rate; without that either, no rate: an older
+        recording's would read as this one's ("Last recording")."""
+        if not self._rate_finished() and not self._file_rate(video_id):
+            self._rate = None
+
+    def _last_recording_rate(self) -> None:
+        """Connected while OBS is idle and nothing measured yet: the newest finished OBS file
+        that gives a rate (one may be gone, or too short)."""
+        if self._rate is not None:
+            return
+        done = [v for v in self.db.videos()
+                if v["sync_source"] == "obs" and v.get("path") and v.get("end_ms") is not None
+                and not v.get("approximate")]
+        for v in sorted(done, key=lambda v: v["start_ms"], reverse=True):
+            if self._file_rate(v["id"]):
+                return
 
     # ---- rows --------------------------------------------------------------------------------
     def _adopt(self, st: dict[str, Any], at: int, started_by_app: bool = False,

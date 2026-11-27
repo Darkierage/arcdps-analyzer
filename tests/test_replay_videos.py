@@ -254,3 +254,23 @@ def test_settings_never_return_the_obs_password(tmp_path: Path):
         assert state.config.settings.obs.password == "s3cret"
         client.put("/api/settings", json={"obs": {"password": ""}})
         assert state.config.settings.obs.password == ""
+
+
+def test_obs_warning_limit_saves_without_reconnecting(tmp_path: Path):
+    client, state = _client(tmp_path)
+    calls: list[str] = []
+    state.obs.settings_changed = lambda: calls.append("reconnect")  # type: ignore[method-assign]
+    state.obs.publish = lambda: calls.append("publish")  # type: ignore[method-assign]
+    with client:
+        form = client.get("/api/settings").json()["settings"]
+        assert form["obs"]["warn_gb_per_hour"] == 10
+        form["obs"]["warn_gb_per_hour"] = 25
+        client.put("/api/settings", json=form)
+        assert state.config.settings.obs.warn_gb_per_hour == 25 and calls == ["publish"]
+        client.put("/api/settings", json={"obs": {"port": 4456}})
+        assert calls == ["publish", "reconnect"]
+        assert client.put("/api/settings", json={"obs": {"warn_gb_per_hour": -1}}).status_code \
+            == 400
+        # Review F3: the field cleared (the page sends null): saved, as no limit.
+        r = client.put("/api/settings", json={"obs": {"warn_gb_per_hour": None}})
+        assert r.status_code == 200 and r.json()["settings"]["obs"]["warn_gb_per_hour"] == 0

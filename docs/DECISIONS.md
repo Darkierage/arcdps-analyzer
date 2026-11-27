@@ -1329,6 +1329,64 @@ Left as is: `tests/test_api.py::test_status_settings_and_fight` sometimes fails 
 WebSocket test session closes (`CancelledError`); it fails the same way without plan 18 (once
 in 6 full runs of the previous commit).
 
+## OBS recording size (2026-11-27)
+
+Plan 19. A user reported 2-3 hour OBS recordings of about 50 GB (about 20 GB per hour, 44 Mbps).
+
+- **The app doesn't change OBS's settings.** The connection only starts and stops recording;
+  resolution, frame rate, encoder and quality stay the user's OBS profile. Reasons: OBS is the
+  user's tool (they may stream with it too); OBS WebSocket can't set an Advanced-mode recording
+  encoder's rate control (it lives in a separate JSON file), encoder ids differ per GPU and OBS
+  version, and a profile write may not apply before OBS rebuilds its outputs. Shrinking files
+  afterwards is ruled out: linked videos are never changed.
+- **Guide instead:** the README's "Keep OBS recordings small" (also a short version in Settings)
+  recommends a hardware encoder (AV1 if the GPU has it, else H.264; not HEVC, which the window
+  can't play), a bitrate cap (8000-10000 Kbps H.264, about 6000 AV1: about 3-4.5 GB per hour at
+  1080p 60 fps), MKV, and 1080p output when playing at a higher resolution. Bitrate rather than
+  a quality preset because the size is then predictable; busy WvW footage makes quality-based
+  modes grow a lot.
+- **Measure what OBS writes:** `GetRecordStatus.outputBytes / outputDuration` (both leave pauses
+  out), asked every 30 s while OBS records, also for recordings the app doesn't link. A rate
+  counts after 60 s. On stop, the recording's last sample stays (no longer live); only without
+  one (it ran under about 90 s) does the finished file give the rate (size over its length
+  minus pauses). The sample comes first because a row's span can be off: in the run against
+  the fake OBS, a tiny file over a row whose start came from OBS's duration gave 0.0 GB per
+  hour. On connecting while idle, the newest finished, non-approximate OBS recording's file
+  gives the rate, so Settings shows it after a restart. Status sends are only made when the
+  rounded rate or its live flag changes.
+- **Warn:** `obs.warn_gb_per_hour` (default 10, about 22 Mbps, twice the guide's upper end;
+  0: never). Above it, the header chip turns amber with "· N GB/h" while recording, and
+  Settings > Recording size shows the rate in amber. Changing only the limit republishes the
+  status without reconnecting to OBS.
+- **Validation:** pytest (the rate math, no rate under a minute, warning on/off and at another
+  limit, no repeated sends, a recording started in OBS measured without being linked, the
+  finished file's rate with a pause left out, the newest OBS file's rate when idle while a newer
+  hand-linked video and a newer approximate OBS row are ignored, the limit saved without a
+  reconnect), `npm run check`, `npm test`, ruff. The built app against the fake OBS server (in
+  Chrome): the header chip turned amber with "OBS recording · 20 GB/h" and Settings showed the
+  rate, the tips and the limit. Not checked with a real OBS: `outputBytes` against the file's
+  final size.
+
+### Review fixes (2026-11-27)
+
+A light use-case review of plan 19 found four low bugs; all fixed, each with a test:
+
+- **A rate outlived its recording across a reconnect.** When the connection dropped, the rate
+  stayed "live", so OBS coming back with a new recording showed the old one's rate (and the
+  amber chip) until a minute of the new one was recorded. A disconnect now ends the live rate.
+- **A short recording kept the previous one's rate as "Last recording".** A recording that ended
+  before it could be measured (under about a minute and a half, and no usable file) now leaves
+  no rate, rather than an older recording's number under its name.
+- **An emptied "Warn above" field failed the whole settings save** (the page sends null). An
+  empty value is saved as 0, no warning. The port and lead-in fields still reject an empty
+  value, as before.
+- **After a restart only the newest OBS recording was tried** for the last rate; a deleted or
+  too short newest file showed none. The newest one that gives a rate is used.
+
+`test_api.py::test_status_settings_and_fight` (and once `test_review_fixes.py::
+test_api_rejects_foreign_hosts_and_origins`) failed with the known `CancelledError` when a test
+WebSocket session closes: 5 of 15 runs of a clean copy of the previous commit fail the same way.
+
 ## Open items at the time of writing
 
 - The Trends page has its first slice only (results per session). Not built: problems across

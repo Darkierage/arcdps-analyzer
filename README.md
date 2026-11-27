@@ -254,6 +254,56 @@ Good to know:
   start OBS yourself), and **Link OBS recordings to their fights automatically (also ones you
   start in OBS)** (off: only the ones the app starts are linked).
 
+### Keep OBS recordings small
+
+The app doesn't change OBS's settings: how big a recording gets is up to your OBS. WvW is hard
+on video encoders (hundreds of players and effects on screen), and quality presets such as
+"Indistinguishable Quality" or recording at 1440p / 4K can write 20 GB or more per hour. To
+review fights, 1080p at a capped bitrate is plenty:
+
+| Bitrate | Per hour | 3-hour evening |
+|---|---|---|
+| 6000 Kbps (AV1) | about 2.7 GB | about 8 GB |
+| 10000 Kbps (H.264) | about 4.5 GB | about 14 GB |
+| 44000 Kbps (what 50 GB for 2.5 hours means) | about 20 GB | about 60 GB |
+
+**How the app helps:** while OBS records, the app measures how much it writes. Above the limit
+(10 GB per hour by default) the header chip turns amber, for example **OBS recording · 20 GB/h**.
+**Settings > Replay and videos > OBS connection > Recording size** shows the current or last
+recording's rate and the limit (0 turns the warning off). Check it after a minute of recording
+to see what a settings change did.
+
+**Choose the encoder.** A hardware encoder costs the game almost no frames:
+
+- **AV1** if OBS lists it: NVIDIA NVENC AV1 (RTX 40 and newer), AMD HW AV1 (RX 7000 and newer)
+  or QuickSync AV1 (Intel Arc). Smallest files for the same picture.
+- Otherwise **H.264**: NVIDIA NVENC H.264, AMD HW H.264 or QuickSync H.264. x264 (the CPU) works
+  but takes frames from the game.
+- Not **HEVC / H.265**: the app's window can't play it.
+
+**OBS Simple mode** (Settings > Output, Output Mode: Simple):
+
+1. **Recording** section: **Recording Quality: Same as stream** (the recording then uses the
+   bitrate below), **Recording Format: Matroska Video (.mkv)**.
+2. **Streaming** section: **Video Encoder** as above, **Video Bitrate: 10000** for H.264 or
+   **6000** for AV1.
+3. If you also stream with this OBS, the stream gets the same bitrate. Most stream sites take
+   about 6000 Kbps at most, so 6000 suits both; or use Advanced mode, which keeps them apart.
+
+**OBS Advanced mode** (Settings > Output, Output Mode: Advanced), **Recording** tab:
+
+1. **Type: Standard**, **Recording Format: Matroska Video (.mkv)**, **Video Encoder** as above.
+2. **Rate Control: CBR** (or VBR), **Bitrate: 10000** for H.264 or **6000** for AV1.
+3. Leave the preset and the other encoder options as they are.
+
+**Resolution and frame rate** (Settings > Video): playing at 1440p or 4K, set **Output (Scaled)
+Resolution: 1920x1080**. **Common FPS Values: 30** halves the size again if you don't need
+smooth motion.
+
+MKV survives a crash or a full disk (an MP4 cut short can't be opened) and plays in the app. To
+get an MP4 for sharing, use **File > Remux Recordings** in OBS: it is quick and keeps the
+quality.
+
 ### Without OBS: link recordings yourself
 
 Any recorder works: NVIDIA ShadowPlay, Windows Game Bar, OBS without the connection, or a video
@@ -296,6 +346,7 @@ what the Replay tab shows.
 |---|---|---|
 | **OBS not running** in the header | OBS is closed, or its WebSocket server is off | Start OBS; check Tools > WebSocket Server Settings |
 | **OBS: password?** | The password is missing or wrong | Copy it again from Show Connect Info, paste it in Settings, Save |
+| **OBS recording · 20 GB/h** in amber | OBS writes more per hour than the limit in Settings | Lower OBS's bitrate or resolution: [Keep OBS recordings small](#keep-obs-recordings-small) |
 | The video stays dark with a note about its format | The window can't read it: often HEVC / H.265, or a container it can't open | In OBS: File > Remux Recordings to MP4 (fixes the container), or record with H.264 or AV1 (fixes HEVC) |
 | The video is a few seconds off | Times in file names are to the second; another PC's clock | −0.5s / +0.5s or Sync here |
 | **file not found** on a video, or "could not be loaded" on the Replay tab | The recording was moved or renamed | Unlink it and link it again from its new place |

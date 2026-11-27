@@ -665,6 +665,14 @@ export interface ObsStatus {
 	error: string | null;
 	/** A recording the app started is still running from a previous run. */
 	leftover: boolean;
+	/** GB per hour OBS writes: the recording running now (live) or the last one; null until a
+	 * recording has run for a minute. */
+	rate: { gbPerHour: number; live: boolean; seconds: number } | null;
+	/** The rate is at or above warnGbPerHour (0: never warn). */
+	rateWarning: boolean;
+	warnGbPerHour: number;
+	/** The README's "Keep OBS recordings small" guide. */
+	sizeGuideUrl: string;
 }
 
 export interface SettingsResponse {

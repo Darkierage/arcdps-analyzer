@@ -412,8 +412,12 @@ def create_app(state: AppState) -> FastAPI:
             state.config.update(patch)
         except Exception as e:
             raise HTTPException(400, f"Invalid settings: {e}") from e
-        if state.config.settings.obs != old_obs:
+        new_obs = state.config.settings.obs
+        if new_obs.model_copy(update={"warn_gb_per_hour": 0}) != \
+                old_obs.model_copy(update={"warn_gb_per_hour": 0}):
             state.obs.settings_changed()
+        elif new_obs.warn_gb_per_hour != old_obs.warn_gb_per_hour:
+            state.obs.publish()  # only the size warning's limit: no reconnect
         templates.reload()
         return get_settings()
 

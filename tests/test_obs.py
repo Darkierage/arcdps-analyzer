@@ -14,7 +14,13 @@ from websockets.sync.server import serve
 
 from wvw_analyzer.config import ConfigStore
 from wvw_analyzer.events import EventBus
-from wvw_analyzer.obs import ObsConnection, ObsService, auth_string, check_connection
+from wvw_analyzer.obs import (
+    ObsConnection,
+    ObsService,
+    auth_string,
+    check_connection,
+    gb_per_hour,
+)
 from wvw_analyzer.store.db import Database
 
 
@@ -28,6 +34,8 @@ class FakeObs:
         self.paused = False
         self.started_at = 0.0
         self.fail_start = False
+        self.status_extra: dict[str, Any] = {}  # e.g. outputDuration / outputBytes (plan 19)
+        self.file_size = 1  # bytes in each finished file (sparse)
         self.requests: list[str] = []
         self.conns: list[Any] = []
         self._lock = threading.Lock()
@@ -92,7 +100,8 @@ class FakeObs:
         elif t == "GetRecordStatus":
             dur = int((time.time() - self.started_at) * 1000) if self.active else 0
             self._reply(ws, d, {"outputActive": self.active, "outputPaused": self.paused,
-                                "outputDuration": dur})
+                                "outputDuration": dur, "outputBytes": dur * 1000,
+                                **(self.status_extra if self.active else {})})
         elif t == "StartRecord":
             if self.fail_start:
                 self._reply(ws, d, ok=False, comment="Not enough disk space")
@@ -115,7 +124,8 @@ class FakeObs:
     def stop(self) -> str:
         self._n += 1
         path = self.record_dir / f"rec{self._n}.mkv"
-        path.write_bytes(b"x")
+        with path.open("wb") as f:
+            f.truncate(self.file_size)
         self.active = False
         self.emit("RecordStateChanged", {"outputActive": False,
                                          "outputState": "OBS_WEBSOCKET_OUTPUT_STOPPED",
@@ -385,3 +395,175 @@ def test_reader_returns_when_closed_before_it_runs():
     conn.close()
     conn.run()  # no socket: returns instead of raising
     assert conn.closed
+
+
+# ---- recording size (plan 19) ----------------------------------------------------------------
+
+def test_gb_per_hour():
+    assert gb_per_hour(4.5e9, 3_600_000) == pytest.approx(4.5)
+    assert gb_per_hour(1e9, 120_000) == pytest.approx(30.0)
+    assert gb_per_hour(1e9, 59_999) is None  # too short to count
+    assert gb_per_hour(0, 600_000) is None and gb_per_hour(None, None) is None
+    assert gb_per_hour("x", 600_000) is None
+
+
+def test_live_rate_and_warning(tmp_path: Path, obs: FakeObs):
+    svc, db, recorder = _service(tmp_path, obs)
+    svc.rate_poll_s = 0.05
+    published: list[dict] = []
+    orig = svc.bus.publish
+    svc.bus.publish = lambda ev: (published.append(ev), orig(ev))  # type: ignore[method-assign]
+    svc.start()
+    try:
+        wait(lambda: svc.status()["state"] == "connected")
+        assert svc.status()["rate"] is None and not svc.status()["rateWarning"]
+        obs.status_extra = {"outputDuration": 30_000, "outputBytes": 10**9}
+        recorder.recording = True
+        svc.on_recording(True)
+        wait(lambda: svc.status()["recording"])
+        time.sleep(0.3)
+        assert svc.status()["rate"] is None  # under a minute: no rate yet
+
+        # 20 GB per hour: 10 minutes, 3.333 GB.
+        obs.status_extra = {"outputDuration": 600_000, "outputBytes": 3_333_333_333}
+        st = wait(lambda: (s := svc.status())["rate"] and s)
+        assert st["rate"] == {"gbPerHour": 20.0, "live": True, "seconds": 600}
+        assert st["rateWarning"] and st["warnGbPerHour"] == 10
+        assert st["sizeGuideUrl"].endswith("#keep-obs-recordings-small")
+        assert any(e["obs"]["rate"] for e in published if e.get("type") == "obs")
+        n = len(published)
+        time.sleep(0.3)  # the same rate again: nothing new to publish
+        assert len(published) == n
+
+        svc.config.update({"obs": {"warn_gb_per_hour": 0}})
+        assert not svc.status()["rateWarning"]  # 0: never
+        svc.config.update({"obs": {"warn_gb_per_hour": 25}})
+        assert not svc.status()["rateWarning"]
+        svc.config.update({"obs": {"warn_gb_per_hour": 10}})
+
+        # Stopped: OBS's own last sample stays, not the 1-byte file over the row's span.
+        recorder.recording = False
+        svc.on_recording(False)
+        st = wait(lambda: (s := svc.status())["rate"] and not s["rate"]["live"] and s)
+        assert st["rate"]["gbPerHour"] == 20.0 and st["rateWarning"]
+    finally:
+        svc.stop()
+
+
+def test_recording_started_in_obs_is_measured_without_auto_link(tmp_path: Path, obs: FakeObs):
+    svc, db, _ = _service(tmp_path, obs, auto_link=False)
+    svc.rate_poll_s = 0.05
+    svc.start()
+    try:
+        wait(lambda: svc.status()["state"] == "connected")
+        obs.status_extra = {"outputDuration": 3_600_000, "outputBytes": 4_500_000_000}
+        obs.start()
+        st = wait(lambda: (s := svc.status())["rate"] and s)
+        assert st["rate"]["gbPerHour"] == 4.5 and not st["rateWarning"]
+        assert db.videos() == []  # measured, not linked
+    finally:
+        svc.stop()
+        obs.active = False
+
+
+def test_last_recordings_file_gives_the_rate_when_idle(tmp_path: Path, obs: FakeObs):
+    svc, db, _ = _service(tmp_path, obs)
+    old = obs.record_dir / "old.mkv"
+    old.write_bytes(b"x")
+    new = obs.record_dir / "new.mkv"
+    with new.open("wb") as f:
+        f.truncate(750_000_000)  # sparse: 0.75 GB
+    db.add_video(path=str(old), label="OBS", start_ms=0, end_ms=3_600_000, sync_source="obs",
+                 approximate=False, started_by_app=True, pauses=[])
+    # 15 minutes with a 5 minute pause: 10 minutes recorded, so 4.5 GB per hour (3.0 if the
+    # pause were counted).
+    db.add_video(path=str(new), label="OBS", start_ms=10_000_000, end_ms=10_900_000,
+                 sync_source="obs", approximate=False, started_by_app=True,
+                 pauses=[[10_100_000, 10_400_000]])
+    # A newer OBS row whose file is gone, and one too short to measure: the next one counts.
+    db.add_video(path=str(obs.record_dir / "deleted.mkv"), label="OBS", start_ms=11_000_000,
+                 end_ms=12_000_000, sync_source="obs", approximate=False, started_by_app=True,
+                 pauses=[])
+    short = obs.record_dir / "short.mkv"
+    with short.open("wb") as f:
+        f.truncate(10**8)
+    db.add_video(path=str(short), label="OBS", start_ms=12_000_000, end_ms=12_030_000,
+                 sync_source="obs", approximate=False, started_by_app=True, pauses=[])
+    # A newer approximate OBS row: its span may be off, so it doesn't count.
+    approx = obs.record_dir / "approx.mkv"
+    with approx.open("wb") as f:
+        f.truncate(10**9)  # 60 GB per hour if it counted
+    db.add_video(path=str(approx), label="OBS", start_ms=15_000_000,
+                 end_ms=15_060_000, sync_source="obs", approximate=True, started_by_app=True,
+                 pauses=[])
+    # A newer hand-linked video is not an OBS recording: it doesn't count.
+    mine = tmp_path / "mine.mp4"
+    mine.write_bytes(b"x" * 10)
+    db.add_video(path=str(mine), label="Me", start_ms=20_000_000, end_ms=30_000_000,
+                 sync_source="manual", approximate=False, started_by_app=False, pauses=[])
+    svc.start()
+    try:
+        st = wait(lambda: (s := svc.status())["rate"] and s)
+        assert st["rate"] == {"gbPerHour": 4.5, "live": False, "seconds": 600}
+    finally:
+        svc.stop()
+
+
+def test_finished_file_gives_the_rate_on_stop(tmp_path: Path, obs: FakeObs):
+    svc, db, recorder = _service(tmp_path, obs)
+    svc.start()
+    try:
+        wait(lambda: svc.status()["state"] == "connected")
+        recorder.recording = True
+        svc.on_recording(True)
+        row = wait(lambda: next(iter(db.videos()), None))
+        # Pretend it ran 20 minutes: move its start back, and make OBS's file 1.5 GB.
+        db.update_video(row["id"], start_ms=row["start_ms"] - 1_200_000)
+        obs.file_size = 1_500_000_000
+        recorder.recording = False
+        svc.on_recording(False)
+        st = wait(lambda: (s := svc.status())["rate"] and s)
+        assert not st["rate"]["live"] and st["rate"]["gbPerHour"] == pytest.approx(4.5, abs=0.1)
+    finally:
+        svc.stop()
+
+
+def test_rate_after_reconnect_and_after_a_short_recording(tmp_path: Path, obs: FakeObs):
+    """Review F1 and F2: a rate is only ever shown for the recording it was measured on."""
+    svc, db, recorder = _service(tmp_path, obs)
+    svc.rate_poll_s = 0.05
+    svc.start()
+    try:
+        wait(lambda: svc.status()["state"] == "connected")
+        obs.status_extra = {"outputDuration": 600_000, "outputBytes": 3_333_333_333}
+        obs.start()  # recording A, started in OBS: 20 GB per hour
+        wait(lambda: (r := svc.status()["rate"]) and r["live"])
+
+        # F1: the connection drops; OBS comes back writing recording B (30 s so far).
+        obs.status_extra = {"outputDuration": 30_000, "outputBytes": 10**9}
+        conn = svc._conn
+        assert conn is not None
+        conn.close()
+        wait(lambda: svc._conn is not None and svc._conn is not conn
+             and svc.status()["state"] == "connected" and svc.status()["recording"])
+        time.sleep(0.3)
+        st = svc.status()
+        assert st["rate"] == {"gbPerHour": 20.0, "live": False, "seconds": 600}  # A's, as last
+        # The chip shows a warning only for a live rate (ObsStatus.svelte: `big`).
+
+        # F2: B stops before it could be measured (its 1-byte file is no rate either): no rate,
+        # rather than A's 20 GB per hour shown as the last recording's.
+        obs.stop()
+        wait(lambda: not svc.status()["recording"])
+        wait(lambda: svc.status()["rate"] is None)
+
+        # A measured recording after that shows again.
+        obs.status_extra = {"outputDuration": 3_600_000, "outputBytes": 4_500_000_000}
+        obs.start()
+        wait(lambda: (r := svc.status()["rate"]) and r["live"] and r["gbPerHour"] == 4.5)
+        obs.stop()
+        st = wait(lambda: (s := svc.status())["rate"] and not s["rate"]["live"] and s)
+        assert st["rate"]["gbPerHour"] == 4.5
+    finally:
+        svc.stop()
+        obs.active = False

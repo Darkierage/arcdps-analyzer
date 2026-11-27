@@ -472,6 +472,34 @@
 					Link OBS recordings to their fights automatically (also ones you start in OBS)
 				</label>
 			</div>
+
+			<!-- Recording size (plan 19): the app measures what OBS writes; OBS's settings stay the user's. -->
+			<h4 class="mt-5 mb-1 text-sm font-semibold">Recording size</h4>
+			{#if live.obs?.rate}
+				{@const r = live.obs.rate}
+				<p class="text-sm {live.obs.rateWarning ? 'text-major' : 'text-muted'}">
+					{r.live ? 'This recording' : 'Last recording'}: about <b>{r.gbPerHour} GB per hour</b> ({Math.round(r.gbPerHour * 3)} GB for a
+					3-hour evening){live.obs.rateWarning ? '. That is more than needed to review fights.' : '.'}
+				</p>
+			{:else}
+				<p class="text-xs text-faint">Shown once OBS has recorded for a minute while connected.</p>
+			{/if}
+			<div class="mt-2 rounded border p-3 text-xs text-muted {live.obs?.rateWarning ? 'border-major/50' : 'border-line'}">
+				<p class="mb-1">The app doesn't change OBS's settings. For about 3-5 GB per hour at 1080p 60 fps, in OBS <b>Settings → Output</b>:</p>
+				<ul class="ml-4 list-disc space-y-0.5">
+					<li>a hardware encoder (NVENC, AMD or QuickSync): AV1 if listed, else H.264. Not HEVC: this window can't play it.</li>
+					<li>a bitrate cap: 8000-10000 Kbps for H.264, about 6000 for AV1 (Simple mode: Recording Quality "Same as stream" and
+						Video Bitrate; Advanced mode: Rate Control CBR or VBR).</li>
+					<li>playing at 1440p or 4K: <b>Settings → Video</b>, Output (Scaled) Resolution 1920x1080.</li>
+				</ul>
+				<p class="mt-1.5">
+					Step by step: <a class="text-accent hover:underline" href={live.obs?.sizeGuideUrl ?? '#'} target="_blank" rel="noreferrer">Keep OBS recordings small</a> (README).
+				</p>
+			</div>
+			<div class="mt-3 max-w-xs">
+				<label class="label" for="owarn">Warn above (GB per hour, 0: never)</label>
+				<input id="owarn" class="input" type="number" min="0" max="1000" step="1" bind:value={s.obs.warn_gb_per_hour} />
+			</div>
 			<div class="mt-3 flex flex-wrap items-center gap-3">
 				<button class="btn" disabled={obsTesting} onclick={testObs}>{obsTesting ? 'Testing…' : 'Test connection'}</button>
 				{#if obsTest}

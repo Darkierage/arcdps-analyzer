@@ -83,6 +83,14 @@ class ObsSettings(BaseModel):
     password: str = ""  # never returned by the API (see api/app.py)
     control_recording: bool = True  # start/stop OBS recording with the app's recording
     auto_link: bool = True  # link OBS recordings to the fights they cover
+    # Warn when OBS writes at least this many GB per hour of recording; 0: never (plan 19).
+    warn_gb_per_hour: float = Field(10, ge=0, le=1000)
+
+    @field_validator("warn_gb_per_hour", mode="before")
+    @classmethod
+    def _empty_limit_is_off(cls, v: Any) -> Any:
+        # The Settings field cleared: no limit, as 0 (a number field sends null when empty).
+        return 0 if v is None or v == "" else v
 
 
 class Settings(BaseModel):
